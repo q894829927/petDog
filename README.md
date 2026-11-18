@@ -14,6 +14,7 @@
 ## 文档
 
 - [产品需求文档（PRD）](docs/PRD.md)
+- [UI 设计基线（Warm Flat）](docs/UI_DESIGN_BASELINE.md)
 - [技术设计文档](docs/TECHNICAL_DESIGN.md)
 - [部署与发布方案](docs/DEPLOYMENT.md)
 - [开发路线图](docs/ROADMAP.md)
@@ -34,11 +35,11 @@
 
 发布流程：推送 main → Actions 构建 dist 并更新 site 分支 → ECS 专属 systemd timer 每约 3 分钟检查并发布。
 
-首次接入 ECS 需要执行一次性安装，详见 [部署与发布方案](docs/DEPLOYMENT.md)。当前页面是部署占位预览，账号、云端存档和宠物互动 API 尚未实现。
+首次接入 ECS 需要执行一次性安装，详见 [部署与发布方案](docs/DEPLOYMENT.md)。当前已切换为全屏 3D 场景与 Warm Flat 悬浮 HUD 原型，使用程序化柴犬及演示数值。账号、云端存档和宠物互动 API 尚未实现。
 
 ## 本地开发
 
-项目初始化完成后，前后端分别安装依赖并启动。具体命令以各自目录的 package.json 为准。
+前端开发：先执行 npm install，再执行 npm run dev；生产构建执行 npm run build。当前是单目录 Vite 前端，后端尚未初始化。
 
 ## 部署
 
@@ -47,4 +48,4 @@
 - 前端静态发布沿用 Game-Portal 的 Vite 静态站点流程。
 - 后端使用独立的构建、发布、systemd 服务和健康检查流程。
 
-当前仓库处于项目初始化阶段，部署配置以部署与发布方案为准。
+当前处于前端 UI/3D 原型阶段。场景中的角色“团子”、属性和互动反馈仅作演示，未连接真实账户或数据库。部署配置以部署与发布方案为准。

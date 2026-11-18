@@ -4,16 +4,18 @@
 
 ## P0：项目骨架与柴犬原型
 
+UI 设计基线参见 [UI_DESIGN_BASELINE.md](UI_DESIGN_BASELINE.md)，已落地程序化 3D 柴犬占位模型，正式 GLB 动画与自主行为逻辑仍未完成。
+
 目标：浏览器中出现一只可观察、可互动的柴犬。
 
 - [ ] 初始化 npm workspaces。
-- [ ] 创建 React + TypeScript + Vite 前端。
-- [ ] 创建 Three.js / React Three Fiber 场景。
+- [x] 创建 React + TypeScript + Vite 前端。
+- [x] 创建 Three.js / React Three Fiber 基础 3D 场景。
 - [ ] 加载第一版柴犬 GLB。
-- [ ] 实现相机、地面、房间和基础灯光。
+- [x] 实现相机、地面、房间和基础灯光（程序化原型）。
 - [ ] 实现待机、走动、坐下、趴下、摇尾等基础动画。
 - [ ] 实现简单自主行为选择。
-- [ ] 完成桌面与手机基础布局。
+- [x] 完成桌面与手机的 Warm Flat HUD 基础布局。
 
 验收：能打开网页看到柴犬；柴犬会自主切换待机行为并在限定区域活动；鼠标和触摸输入可命中宠物。
 
