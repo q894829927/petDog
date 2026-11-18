@@ -1,7 +1,7 @@
 # 倩岚汪 — 部署与发布方案
 
-- 文档版本：0.1
-- 当前状态：方案阶段，尚未在 ECS 安装
+- 文档版本：0.2
+- 当前状态：前端自动发布工作流已提交；ECS 首次安装与线上验证待执行；后端尚未实现
 - 仓库：q894829927/petDog
 - 前端路径：/games/petdog/
 - API 路径：/pet-api/
@@ -35,6 +35,50 @@ Game-Portal 当前的自动发布工具适用于公开静态 HTML 和 Vite 项�
 由于仓库已经创建，脚手架输出目录不能直接指向已有仓库目录。使用 Game-Portal 脚手架时应先生成到临时目录，再将所需配置合并到本仓库，保留 monorepo 的根 package.json、工作区和前端构建输出约定。
 
 前端工作流必须在根目录执行 npm run build，并最终生成根目录 dist。不要让静态发布流程把后端源码、数据库或环境文件复制到 dist。
+
+### 2.1 当前前端接入状态
+
+仓库已包含前端 Vite 构建和 GitHub Actions 发布工作流。构建输出为根目录 dist，Vite base 固定为 /games/petdog/。工作流只发布静态产物，不包含后端源码、数据库或环境配置。
+
+首次在 ECS 安装：
+
+```bash
+cd /root/Game-Portal
+git status --short
+git fetch origin main
+git merge --ff-only FETCH_HEAD
+bash -n scripts/install-managed-static-ecs.sh
+bash scripts/install-managed-static-ecs.sh \
+  --slug petdog \
+  --repo q894829927/petDog
+```
+
+执行前，确认 petDog 仓库的 GitHub Actions 中 **Publish managed static site** 已成功，并已生成 site 分支。安装器会检查现有门户、游戏健康状态和 Nginx 路由冲突；预检失败时停止并根据报错排查。
+
+若 ECS 无法通过 HTTPS 访问 GitHub，可为 petdog 单独配置只读 Deploy Key：
+
+```bash
+cd /root/Game-Portal
+bash scripts/provision-managed-ssh-ecs.sh \
+  --slug petdog \
+  --repo q894829927/petDog
+```
+
+将脚本输出的公钥添加到 petDog 仓库 Settings → Deploy keys，保持只读，不勾选 Allow write access，然后重新执行安装器。私钥只保留在 ECS。
+
+安装完成后检查：
+
+```bash
+systemctl is-enabled portal-site-petdog.timer
+systemctl is-active portal-site-petdog.timer
+systemctl start portal-site-petdog.service
+journalctl -u portal-site-petdog.service -n 60 --no-pager
+readlink -f /var/www/game-portal/managed-sites/petdog/current
+cat /var/www/game-portal/managed-sites/petdog/current/.source-sha
+curl -fsS https://47.119.122.133/games/petdog/ -o /dev/null
+```
+
+只有 timer 已启用、服务日志显示 SUCCESS、线上页面可访问且发布 SHA 与 main 对应提交一致，前端自动部署才算完成。
 
 ## 3. 后端独立服务
 
@@ -128,7 +172,8 @@ Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理�
 
 以下工作必须在实现阶段完成并在真实 ECS 验证后，才能标记为生产可用：
 
-- [ ] 前端 Vite 工作区与静态发布工作流。
+- [x] 前端 Vite 基础工程与静态发布工作流已提交。
+- [ ] ECS 前端站点首次安装、timer 启用与线上验收。
 - [ ] API 构建、测试和 release 工作流。
 - [ ] ECS API 安装器与受控发布器。
 - [ ] petdog-api.service 和 timer。

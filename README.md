@@ -26,6 +26,16 @@
 - 认证：Argon2id、服务端 Session、HttpOnly Cookie
 - 测试：Vitest、Playwright
 
+## 当前部署状态
+
+前端 Vite 项目已配置独立 GitHub Actions 发布工作流，目标地址：
+
+- https://47.119.122.133/games/petdog/
+
+发布流程：推送 main → Actions 构建 dist 并更新 site 分支 → ECS 专属 systemd timer 每约 3 分钟检查并发布。
+
+首次接入 ECS 需要执行一次性安装，详见 [部署与发布方案](docs/DEPLOYMENT.md)。当前页面是部署占位预览，账号、云端存档和宠物互动 API 尚未实现。
+
 ## 本地开发
 
 项目初始化完成后，前后端分别安装依赖并启动。具体命令以各自目录的 package.json 为准。

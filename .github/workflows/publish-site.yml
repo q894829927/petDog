@@ -1,0 +1,70 @@
+name: Publish managed static site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-managed-static
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Build
+        run: |
+          VITE_BUILD_SHA="$GITHUB_SHA" npm run build
+          test -s dist/index.html
+          grep -Fq "/games/petdog/" dist/index.html
+
+      - name: Publish current main build to site
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$current" == "$GITHUB_SHA" ]] || { echo "Outdated commit; skip"; exit 0; }
+
+          target="$RUNNER_TEMP/managed-site"
+          if git ls-remote --exit-code origin refs/heads/site >/dev/null; then
+            git fetch origin refs/heads/site
+            git worktree add --detach "$target" FETCH_HEAD
+            git -C "$target" switch -C site
+          else
+            git worktree add --detach "$target" HEAD
+            git -C "$target" switch --orphan site
+          fi
+
+          find "$target" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+          cp -a dist/. "$target/"
+          printf '%s\n' "$GITHUB_SHA" > "$target/.source-sha"
+          printf 'portal-managed-static-v1\n' > "$target/.site-kind"
+          printf 'petdog\n' > "$target/.site-slug"
+
+          git -C "$target" config user.name 'github-actions[bot]'
+          git -C "$target" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$target" add -A
+          if ! git -C "$target" diff --cached --quiet; then
+            git -C "$target" commit -m "deploy: petdog from $GITHUB_SHA"
+            git -C "$target" push origin HEAD:refs/heads/site
+          fi
