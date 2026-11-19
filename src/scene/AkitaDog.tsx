@@ -21,7 +21,7 @@ import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
 import { hitPetPart } from "./petTouch";
-import type { HandContact } from "./PlayerHand";
+import type { HandContact, HandGesture } from "./PlayerHand";
 import {
   ballClearance,
   ballGroundY,
@@ -482,9 +482,13 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (tool === "ball") trigger("ball");
   };
 
-  const placeHand = (event: ThreeEvent<PointerEvent>, pressed: boolean) => {
+  const placeHand = (event: ThreeEvent<PointerEvent>, gesture: HandGesture, pressed: boolean) => {
     const { object, face, barycoord } = event;
     if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return;
+    const previous = handContact.current;
+    const sameGesture = previous?.pointer === event.pointerId && previous.gesture === gesture;
+    let startedAt = sameGesture ? previous.startedAt : null;
+    if (pressed && (!sameGesture || !previous.pressed)) startedAt = performance.now();
     handContact.current = {
       dog: dog.current,
       mesh: object,
@@ -492,6 +496,8 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       weights: barycoord,
       pointer: event.pointerId,
       screenPoint: event.pointer.clone(),
+      gesture,
+      startedAt,
       pressed,
       visibleUntil: Infinity,
     };
@@ -502,7 +508,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const part = hitPetPart(event, head);
     if (tool === "brush" && part !== "back") return;
     event.stopPropagation();
-    placeHand(event, true);
+    placeHand(event, tool === "brush" ? "brush" : part ?? "head", true);
     if (tool === "pet") {
       const now = performance.now();
       if (now - lastPetAt.current < 400) return;
@@ -517,12 +523,13 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {
     if (!event.isPrimary || tool === "ball") return;
-    const onBack = tool === "brush" && hitPetPart(event, head) === "back";
+    const part = hitPetPart(event, head);
+    const onBack = tool === "brush" && part === "back";
     const pressed = (event.buttons & 1) !== 0;
     const target = handContact.current;
     const holdingHand = pressed && target?.pointer === event.pointerId;
     if ((tool === "pet" || onBack || holdingHand) && (event.pointerType === "mouse" || pressed)) {
-      placeHand(event, pressed);
+      placeHand(event, tool === "brush" ? "brush" : part ?? "head", pressed);
     } else if (tool === "brush" && !onBack && target?.pointer === event.pointerId) {
       handContact.current = null;
     }
