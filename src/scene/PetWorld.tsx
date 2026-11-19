@@ -2,8 +2,8 @@ import { Suspense, useEffect, useRef, type PointerEvent, type RefObject } from "
 import { Canvas, events, useThree, type RootStore, type ThreeEvent } from "@react-three/fiber";
 import { SkinnedMesh, Vector2, type Mesh, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
-import { AkitaDog } from "./AkitaDog";
-import { PlayerHand, type HandContact } from "./PlayerHand";
+import { AkitaDog, type PokeGuide } from "./AkitaDog";
+import { beginPokeContact, PlayerHand, type HandContact } from "./PlayerHand";
 import { createNearbyTouchPicker } from "./petTouch";
 import { ballGroundY, ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
 
@@ -27,7 +27,7 @@ function roomEvents(store: RootStore) {
     filter(hits, { scene, camera, pointer, size }) {
       if (!allowNearby) return hits;
       const { tool, panel, foodOpen } = useGameUI.getState();
-      if (tool === "ball" || panel || foodOpen || hits.some(({ object }) => object instanceof SkinnedMesh)) return hits;
+      if ((tool !== "pet" && tool !== "brush") || panel || foodOpen || hits.some(({ object }) => object instanceof SkinnedMesh)) return hits;
       const mesh = scene.getObjectByName("Akita")?.getObjectByProperty("isSkinnedMesh", true);
       if (!(mesh instanceof SkinnedMesh)) return hits;
       const nearby = pickNearby(mesh, camera, pointer, size.width, size.height);
@@ -184,6 +184,17 @@ export function PetWorld() {
   const highQuality = useGameUI((state) => state.quality === "high");
   const ball = useRef<Mesh>(null);
   const handContact = useRef<HandContact | null>(null);
+  const pokeGuide = useRef<PokeGuide>({ button: null, contact: null });
+  const pokeAtTarget = () => {
+    const { button, contact } = pokeGuide.current;
+    const ui = useGameUI.getState();
+    if (!button || button.hidden || !contact || ui.tool !== "poke" || ui.panel) return;
+    handContact.current = beginPokeContact(contact);
+    pokeGuide.current.contact = null;
+    button.hidden = true;
+    ui.setTool("pet");
+    ui.trigger("poke", { part: "poke" });
+  };
   const releaseHand = (event: PointerEvent<HTMLDivElement>) => {
     const target = handContact.current;
     if (target?.pointer !== event.pointerId) return;
@@ -206,10 +217,18 @@ export function PetWorld() {
         <StageCamera />
         <Room shadows={highQuality} ball={ball} />
         <Suspense fallback={null}>
-          <AkitaDog ball={ball} handContact={handContact} />
+          <AkitaDog ball={ball} handContact={handContact} pokeGuide={pokeGuide} />
           <PlayerHand contact={handContact} />
         </Suspense>
       </Canvas>
+      <button
+        type="button"
+        className="poke-target"
+        aria-label="轻点尾根下方"
+        ref={(button) => { pokeGuide.current.button = button; }}
+        onClick={pokeAtTarget}
+        hidden
+      />
     </div>
   );
 }

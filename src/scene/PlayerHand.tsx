@@ -2,21 +2,18 @@ import { useMemo, useRef, type RefObject } from "react";
 import { useFrame, useLoader } from "@react-three/fiber";
 import {
   Bone, MathUtils, Matrix4, Mesh, Quaternion, Raycaster, Triangle, Vector2, Vector3,
-  type Group, type Material, type SkinnedMesh,
+  type Group, type Material,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import playerHandUrl from "../assets/player-hand.glb?url";
 import { useGameUI, type PetPart } from "../store/useGameUI";
 import { createHandClearance } from "./handClearance";
-import { hitPetTarget } from "./petTouch";
+import { hitPetTarget, samplePetSurface, type PetSurface } from "./petTouch";
 
 export type HandGesture = PetPart | "brush";
 
-export type HandContact = {
+export type HandContact = PetSurface & {
   dog: Group;
-  mesh: SkinnedMesh;
-  vertices: readonly [number, number, number];
-  weights: Vector3;
   pointer: number;
   touch: boolean;
   screenPoint: Vector2;
@@ -51,14 +48,8 @@ const gestureDelay = 0.065;
 const followSpeed = 5.6;
 const wristSpeed = 11;
 
-function sampleSurface(target: HandContact, triangle: Triangle, point: Vector3, normal: Vector3) {
-  const { a, b, c } = triangle;
-  const [ia, ib, ic] = target.vertices;
-  target.mesh.getVertexPosition(ia, a).applyMatrix4(target.mesh.matrixWorld);
-  target.mesh.getVertexPosition(ib, b).applyMatrix4(target.mesh.matrixWorld);
-  target.mesh.getVertexPosition(ic, c).applyMatrix4(target.mesh.matrixWorld);
-  point.copy(a).multiplyScalar(target.weights.x).addScaledVector(b, target.weights.y).addScaledVector(c, target.weights.z);
-  triangle.getNormal(normal);
+export function beginPokeContact(target: HandContact, now = performance.now()): HandContact {
+  return { ...target, screenPoint: target.screenPoint.clone(), gesture: "poke", startedAt: now, pressed: false, visibleUntil: now + 540 };
 }
 
 function handMaterials(group: Group, comb: Group) {
@@ -168,7 +159,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     let target = contact.current;
     const { tool, panel, foodOpen } = useGameUI.getState();
     const step = Math.min(delta, 0.05);
-    const disabled = tool === "ball" || panel || foodOpen;
+    const disabled = tool === "ball" || tool === "poke" || panel || foodOpen;
     if (disabled || (target && (performance.now() >= target.visibleUntil || (tool === "brush") !== (target.gesture === "brush")))) {
       contact.current = null;
       target = null;
@@ -181,7 +172,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.repickIn = Math.max(0, pose.repickIn - step);
     if (target) {
       target.dog.updateMatrixWorld(true);
-      sampleSurface(target, pose.triangle, pose.hitPoint, pose.hitNormal);
+      samplePetSurface(target, pose.triangle, pose.hitPoint, pose.hitNormal);
       pose.view.subVectors(camera.position, pose.hitPoint).normalize();
       pose.screen.copy(pose.hitPoint).project(camera);
       const drift = Math.hypot((pose.screen.x - target.screenPoint.x) * size.width, (pose.screen.y - target.screenPoint.y) * size.height);
@@ -199,7 +190,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
               previous.vertices = [hit.face.a, hit.face.b, hit.face.c];
               previous.weights = hit.barycoord;
               previous.gesture = tool === "brush" ? "brush" : part;
-              sampleSurface(previous, pose.triangle, pose.hitPoint, pose.hitNormal);
+              samplePetSurface(previous, pose.triangle, pose.hitPoint, pose.hitNormal);
               target = previous;
             }
           }

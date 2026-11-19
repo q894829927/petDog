@@ -1,11 +1,29 @@
-import { Matrix4, SkinnedMesh, Triangle, Vector3, Vector4, type Camera, type Intersection, type Vector2 } from "three";
+import { Matrix4, Mesh, Raycaster, SkinnedMesh, Triangle, Vector2, Vector3, Vector4, type Camera, type Intersection } from "three";
 import type { PetTarget } from "../store/useGameUI";
 
 const faceBones = /^(head|mouth|nose|tongue_|eye_)/;
 const legBones = /^(hip|thigh|leg|shin|foot|claws)_/;
 const touchRadius = 10;
 const cameraForward = new Vector3(0, 0, -1);
+const akitaRearHeight = 0.374;
+const rearGuideOffsets = [[0, 0], [0, 4], [-4, 3], [4, 3], [-5, 0], [5, 0], [0, -3]];
 type TouchHit = Pick<Intersection, "object" | "face" | "barycoord"> & { nearTouch?: true };
+
+export type PetSurface = {
+  mesh: SkinnedMesh;
+  vertices: readonly [number, number, number];
+  weights: Vector3;
+};
+
+export function samplePetSurface({ mesh, vertices, weights }: PetSurface, triangle: Triangle, point: Vector3, normal: Vector3) {
+  const { a, b, c } = triangle;
+  const [ia, ib, ic] = vertices;
+  mesh.getVertexPosition(ia, a).applyMatrix4(mesh.matrixWorld);
+  mesh.getVertexPosition(ib, b).applyMatrix4(mesh.matrixWorld);
+  mesh.getVertexPosition(ic, c).applyMatrix4(mesh.matrixWorld);
+  point.copy(a).multiplyScalar(weights.x).addScaledVector(b, weights.y).addScaledVector(c, weights.z);
+  triangle.getNormal(normal);
+}
 
 export function hitPetTarget(
   { object, face, barycoord, nearTouch }: TouchHit,
@@ -44,7 +62,7 @@ export function hitPetTarget(
   const side = x >= 0 ? "L" : "R";
   // The center below the tail root is a small spot on the exposed rear surface.
   if (intent === "tap" && !nearTouch && tail < 0.28 && z < -0.222 &&
-      (x / 0.029) ** 2 + ((y - 0.374) / 0.021) ** 2 <= 1) return { part: "poke", side };
+      (x / 0.034) ** 2 + ((y - akitaRearHeight) / 0.024) ** 2 <= 1) return { part: "poke", side };
   if (ears >= 0.29) return { part: "ear", side };
   if (head + ears >= 0.5) {
     if (y < 0.455 && z > 0.312) return { part: "chin" };
@@ -59,6 +77,45 @@ export function hitPetTarget(
   if (neck >= 0.45 || (z > 0.148 && y < 0.45)) return { part: "chest", side };
   if (y > 0.425 && trunk + neck > 0.39) return { part: "back", side };
   return { part: "flank", side };
+}
+
+export function createAkitaRearGuide(mesh: SkinnedMesh) {
+  const ray = new Raycaster(new Vector3(0, akitaRearHeight, -0.8), new Vector3(0, 0, 1));
+  const hit = ray.intersectObject(new Mesh(mesh.geometry, mesh.material))[0];
+  if (!hit?.face || !hit.barycoord) throw new Error("Akita rear contact missing");
+  const surface: PetSurface = { mesh, vertices: [hit.face.a, hit.face.b, hit.face.c], weights: hit.barycoord };
+  const triangle = new Triangle();
+  const point = new Vector3();
+  const normal = new Vector3();
+  const view = new Vector3();
+  const projection = new Vector3();
+  const screenPoint = new Vector2();
+  const sample = new Vector2();
+  let visibleSurface: PetSurface | null = null;
+  let checkedAt = -Infinity;
+
+  return (camera: Camera, width: number, height: number, time: number) => {
+    samplePetSurface(surface, triangle, point, normal);
+    if (normal.dot(view.subVectors(camera.position, point)) <= 0) return null;
+    projection.copy(point).project(camera);
+    if (Math.abs(projection.x) > 1 || Math.abs(projection.y) > 1 || Math.abs(projection.z) > 1) return null;
+    screenPoint.set(projection.x, projection.y);
+    if (time - checkedAt >= 120) {
+      checkedAt = time;
+      visibleSurface = null;
+      // A moving tail can briefly hide the center while nearby fur is still exposed.
+      for (const [dx, dy] of rearGuideOffsets) {
+        sample.set(screenPoint.x + 2 * dx / width, screenPoint.y - 2 * dy / height);
+        ray.setFromCamera(sample, camera);
+        const hit = ray.intersectObject(mesh)[0];
+        if (hit?.face && hit.barycoord && hitPetTarget(hit, "tap")?.part === "poke") {
+          visibleSurface = { mesh, vertices: [hit.face.a, hit.face.b, hit.face.c], weights: hit.barycoord };
+          break;
+        }
+      }
+    }
+    return visibleSurface && { ...visibleSurface, screenPoint };
+  };
 }
 
 export function createNearbyTouchPicker() {

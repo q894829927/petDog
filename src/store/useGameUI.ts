@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
-export type ToolMode = "pet" | "ball" | "brush";
-export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush" | "poke";
+export type ToolMode = "pet" | "ball" | "brush" | "poke";
+export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush" | "aimPoke" | "poke";
 export type MealKind = "feed" | "water";
 export type PetPart = "head" | "ear" | "cheek" | "chin" | "chest" | "back" | "flank" | "leg" | "paw" | "tailRoot" | "tail" | "belly" | "poke";
 export type PetSide = "L" | "R";

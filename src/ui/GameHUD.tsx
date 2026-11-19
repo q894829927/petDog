@@ -53,6 +53,7 @@ const toolHint: Record<ToolMode, string> = {
   pet: "轻触团子，摸摸它",
   ball: "点击团子或地面，把球抛出去",
   brush: "从团子的肩背朝尾巴梳",
+  poke: "等团子转身，轻点尾巴下方的圆点",
 };
 
 function InteractionDock() {
@@ -73,7 +74,16 @@ function InteractionDock() {
         <button type="button" className={"dock-item" + (tool === "pet" && !foodOpen ? " dock-item--active" : "")} onClick={() => setTool("pet")} aria-pressed={tool === "pet" && !foodOpen}>
           <span className="dock-icon"><Icon name="hand" size={24}/></span><span>抚摸</span>
         </button>
-        <button type="button" className="dock-item" onClick={() => trigger("call")}>
+        <button type="button" className={"dock-item" + (tool === "poke" ? " dock-item--active" : "")} aria-pressed={tool === "poke"} onClick={() => {
+          setTool(tool === "poke" ? "pet" : "poke");
+          if (tool !== "poke") trigger("aimPoke");
+        }}>
+          <span className="dock-icon"><Icon name="target" size={24}/></span><span>点戳</span>
+        </button>
+        <button type="button" className="dock-item" onClick={() => {
+          if (tool === "poke") setTool("pet");
+          trigger("call");
+        }}>
           <span className="dock-icon"><Icon name="whistle" size={24}/></span><span>呼唤</span>
         </button>
         <button type="button" className={"dock-item" + (foodOpen ? " dock-item--active" : "")} onClick={toggleFood} aria-expanded={foodOpen}>

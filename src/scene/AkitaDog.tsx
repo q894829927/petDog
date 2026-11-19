@@ -22,9 +22,9 @@ import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions } from "./petReactions";
-import { hitPetTarget } from "./petTouch";
+import { createAkitaRearGuide, hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
-import type { HandContact, HandGesture } from "./PlayerHand";
+import { beginPokeContact, type HandContact, type HandGesture } from "./PlayerHand";
 import {
   ballClearance,
   ballGroundY,
@@ -82,6 +82,8 @@ type PetStroke = {
 type PendingInteraction = { interaction: Interaction; owner: number | null };
 
 type PokeReaction = { target: PetTarget; phase: "contact" | "recoil" | "turn"; time: number };
+type RearTap = { contact: HandContact; target: PetTarget; x: number; y: number; startedAt: number };
+export type PokeGuide = { button: HTMLButtonElement | null; contact: HandContact | null };
 
 type Recline = {
   phase: "turn" | "down" | "hold" | "up";
@@ -138,7 +140,11 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
   return fraction === 1;
 }
 
-export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; handContact: RefObject<HandContact | null> }) {
+export function AkitaDog({ ball, handContact, pokeGuide }: {
+  ball: RefObject<Mesh | null>;
+  handContact: RefObject<HandContact | null>;
+  pokeGuide: RefObject<PokeGuide>;
+}) {
   const quality = useGameUI((state) => state.quality);
   const modelQuality = useDeferredValue(quality);
   const { scene, animations: assetClips } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
@@ -166,6 +172,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     return mesh;
   }, [scene]);
   const dog = useRef<Group>(null);
+  const rearGuide = useMemo(() => createAkitaRearGuide(skin), [skin]);
   const rig = useRef<Group>(null);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
@@ -185,7 +192,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   const lastPetAt = useRef(-Infinity);
   const petStroke = useRef<PetStroke | null>(null);
   const brushing = useRef<{ pointer: number; startZ: number } | null>(null);
-  const rearTap = useRef<{ pointer: number; x: number; y: number; startedAt: number } | null>(null);
+  const rearTap = useRef<RearTap | null>(null);
   const pokeCue = useRef<PokeReaction | null>(null);
 
   const play = useCallback((name: string, time = 0) => {
@@ -234,6 +241,8 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   useEffect(() => {
     handContact.current = null;
+    pokeGuide.current.contact = null;
+    if (pokeGuide.current.button) pokeGuide.current.button.hidden = true;
     scene.traverse((child) => {
       if (child instanceof Mesh) child.castShadow = true;
     });
@@ -263,7 +272,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       mixer.stopAllAction();
       currentAction.current = null;
     };
-  }, [handContact, mixer, play, rest, scene]);
+  }, [handContact, mixer, play, pokeGuide, rest, scene]);
 
   const startInteraction = useCallback((interaction: Interaction, owner: number | null) => {
     const toy = ball.current;
@@ -340,7 +349,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       roaming.current.restTime = 1.8;
       pokeCue.current = { target: interaction, phase: "contact", time: 0.21 };
     } else if (kind === "call") play("LookAround");
-    else if (kind === "feed" || kind === "water") play("Idle");
+    else if (kind === "feed" || kind === "water" || kind === "aimPoke") play("Idle");
     else {
       if (kind === "brush") play("Brush");
       else reactToPet(interaction);
@@ -497,16 +506,20 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const toy = ball.current;
     const clip = action.getClip().name;
     const cue = pokeCue.current;
+    const guide = pokeGuide.current;
+    const { panel, foodOpen } = useGameUI.getState();
+    const aiming = tool === "poke" && !panel && !foodOpen && !cue && !nap.current && !recline.current && !fetch.current && !approach.current;
+    if (!aiming && guide.button && !guide.button.hidden) {
+      guide.button.hidden = true;
+      guide.contact = null;
+    }
     if (cue?.phase === "contact") {
-      if (tool !== "pet" || handContact.current?.gesture !== "poke") pokeCue.current = null;
-      else {
-        cue.time -= step;
-        if (cue.time <= 0) {
-          reactions.play(cue.target);
-          useGameUI.getState().setNotice(petMessages.poke);
-          cue.phase = "recoil";
-          cue.time = 0.48;
-        }
+      cue.time -= step;
+      if (cue.time <= 0) {
+        reactions.play(cue.target);
+        useGameUI.getState().setNotice(petMessages.poke);
+        cue.phase = "recoil";
+        cue.time = 0.48;
       }
     } else if (cue?.phase === "recoil") {
       cue.time -= step;
@@ -520,6 +533,23 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
         pokeCue.current = null;
         rest();
         useGameUI.getState().setNotice("团子转过身，面向你站好了。");
+      }
+      return;
+    }
+    if (aiming && guide.button) {
+      roaming.current.target = null;
+      const ready = face(group, headingTo(group.position, camera.position) + Math.PI - 0.25, turnSpeed * step);
+      play(ready ? "Idle" : "Walk");
+      group.updateMatrixWorld(true);
+      const surface = ready ? rearGuide(camera, size.width, size.height, performance.now()) : null;
+      guide.button.hidden = surface === null;
+      if (surface) {
+        const x = Math.round((surface.screenPoint.x + 1) * size.width / 2);
+        const y = Math.round((1 - surface.screenPoint.y) * size.height / 2);
+        guide.button.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+        guide.contact = { ...surface, dog: group, pointer: -1, touch: false, gesture: "poke", startedAt: null, pressed: false, visibleUntil: Infinity };
+      } else {
+        guide.contact = null;
       }
       return;
     }
@@ -685,14 +715,14 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (tool === "ball") trigger("ball");
   };
 
-  const placeHand = (event: ThreeEvent<PointerEvent>, gesture: HandGesture, pressed: boolean) => {
+  const contactFromPointer = (event: ThreeEvent<PointerEvent>, gesture: HandGesture, pressed: boolean): HandContact | null => {
     const { object, face, barycoord } = event;
-    if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return;
+    if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return null;
     const previous = handContact.current;
     const samePointer = previous?.pointer === event.pointerId;
     const now = performance.now();
-    const startedAt = event.type === "pointerdown" || gesture === "poke" ? now : samePointer ? previous.startedAt : null;
-    handContact.current = {
+    const startedAt = event.type === "pointerdown" ? now : samePointer ? previous.startedAt : null;
+    return {
       dog: dog.current,
       mesh: object,
       vertices: [face.a, face.b, face.c],
@@ -703,8 +733,13 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       gesture,
       startedAt,
       pressed,
-      visibleUntil: gesture === "poke" ? now + 540 : Infinity,
+      visibleUntil: Infinity,
     };
+  };
+
+  const placeHand = (event: ThreeEvent<PointerEvent>, gesture: HandGesture, pressed: boolean) => {
+    const contact = contactFromPointer(event, gesture, pressed);
+    if (contact) handContact.current = contact;
   };
 
   const startPetStroke = (pointer: number, target: PetTarget, now: number) => {
@@ -715,7 +750,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   };
 
   const pointerDown = (event: ThreeEvent<PointerEvent>) => {
-    if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
+    if (!event.isPrimary || event.button !== 0 || (tool !== "pet" && tool !== "brush")) return;
     petStroke.current = null;
     brushing.current = null;
     rearTap.current = null;
@@ -726,7 +761,10 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (tool === "pet") {
       const now = performance.now();
       if (target.part === "poke") {
-        rearTap.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, startedAt: now };
+        const contact = contactFromPointer(event, "poke", true);
+        if (!contact) return;
+        rearTap.current = { contact, target, x: event.clientX, y: event.clientY, startedAt: now };
+        (event.target as Element).setPointerCapture(event.pointerId);
       } else {
         placeHand(event, target.part, true);
         startPetStroke(event.pointerId, target, now);
@@ -740,7 +778,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   };
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {
-    if (!event.isPrimary || tool === "ball") return;
+    if (!event.isPrimary || (tool !== "pet" && tool !== "brush")) return;
     const picked = hitPetTarget(event);
     const part = picked?.part;
     const onBack = tool === "brush" && part === "back";
@@ -749,9 +787,11 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const now = performance.now();
     if (target?.gesture === "poke" && now < target.visibleUntil) return;
     const tapping = rearTap.current;
-    if (tapping?.pointer === event.pointerId && pressed) {
-      if (Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= pokeDragLimit) return;
+    if (tapping?.contact.pointer === event.pointerId && pressed) {
+      const limit = tapping.contact.touch ? 12 : pokeDragLimit;
+      if (Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= limit) return;
       rearTap.current = null;
+      (event.target as Element).releasePointerCapture(event.pointerId);
       if (picked && tool === "pet") startPetStroke(event.pointerId, picked, now);
     }
     if (part && (tool === "pet" || onBack) && (event.pointerType === "mouse" || pressed)) {
@@ -782,15 +822,16 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   const finishPointer = (event: ThreeEvent<PointerEvent>) => {
     const tapping = rearTap.current;
-    if (tapping?.pointer === event.pointerId) {
+    if (tapping?.contact.pointer === event.pointerId && event.type !== "pointerout") {
       rearTap.current = null;
+      const pointerTarget = event.target as Element;
+      if (pointerTarget.hasPointerCapture(event.pointerId)) pointerTarget.releasePointerCapture(event.pointerId);
       if (event.type === "pointerup" && tool === "pet") {
-        const picked = hitPetTarget(event, "tap");
         const now = performance.now();
-        if (picked?.part === "poke" && now - tapping.startedAt <= pokeTapLimit &&
-            Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= pokeDragLimit) {
-          placeHand(event, "poke", false);
-          trigger("poke", picked);
+        const limit = tapping.contact.touch ? 12 : pokeDragLimit;
+        if (now - tapping.startedAt <= pokeTapLimit && Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= limit) {
+          handContact.current = beginPokeContact(tapping.contact, now);
+          trigger("poke", tapping.target);
           return;
         }
         const normalTouch = hitPetTarget(event);
