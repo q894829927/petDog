@@ -1,8 +1,7 @@
-import { SkinnedMesh, Vector3, type Object3D } from "three";
-import type { ThreeEvent } from "@react-three/fiber";
+import { SkinnedMesh, Vector3, type Intersection, type Object3D } from "three";
 import type { PetPart } from "../store/useGameUI";
 
-export function hitPetPart(event: ThreeEvent<PointerEvent | MouseEvent>, head: Object3D): PetPart | null {
+export function hitPetPart(event: Pick<Intersection, "object" | "face" | "point">, head: Object3D): PetPart | null {
   const { object, face, point } = event;
   if (!(object instanceof SkinnedMesh) || !face) return null;
 

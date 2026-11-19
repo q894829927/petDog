@@ -492,6 +492,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     handContact.current = {
       dog: dog.current,
       mesh: object,
+      head,
       vertices: [face.a, face.b, face.c],
       weights: barycoord,
       pointer: event.pointerId,
