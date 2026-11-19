@@ -29,11 +29,12 @@ export type HandContact = {
 const bendAxis = new Vector3(0, 0, 1);
 const pitchAxis = new Vector3(1, 0, 0);
 const worldUp = new Vector3(0, 1, 0);
-const palmPad = new Vector3(-0.013, 0.093, -0.01);
+const palmPad = new Vector3(-0.013, 0.104, -0.016);
+const indexPad = new Vector3(0, 0.023, 0);
 const fingerNames = ["index", "middle", "ring", "pinky", "thumb"];
 const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
 const thumbCurls: Record<HandGesture, number> = { head: 0.105, chin: 0.22, back: 0.105, brush: 0.24 };
-const palmContact: Record<HandGesture, number> = { head: 0.32, chin: 0, back: 0.43, brush: 0.26 };
+const palmContact: Record<HandGesture, number> = { head: 0.3, chin: 0, back: 0.82, brush: 0.26 };
 const contactGrace = 0.11;
 const reachTime = 0.15;
 const retractTime = 0.23;
@@ -71,7 +72,7 @@ function fingerCurl(gesture: HandGesture, finger: number, phase: number, stroke:
     case "chin":
       return finger < 2 ? 0.23 + 0.19 * Math.sin(phase + finger * 2.45) : 0.47 + finger * 0.034;
     case "back":
-      return 0.06 + finger * 0.018 + 0.036 * stroke;
+      return 0.10 + finger * 0.022 + 0.036 * stroke;
     case "brush":
       return 0.36 + finger * 0.035;
     case "head":
@@ -84,7 +85,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
   const hand = useRef<Group>(null);
   const rig = useMemo(() => {
     const tip = scene.getObjectByName("player_hand_tip");
-    if (!tip) throw new Error("Player hand fingertip missing");
+    const index = scene.getObjectByName("index_03_r");
+    if (!tip || !index) throw new Error("Player hand fingertip missing");
     const fingers: { bone: Bone; rest: Quaternion; finger: number; bend: number }[] = [];
     scene.traverse((child) => {
       if (!(child instanceof Bone)) return;
@@ -95,7 +97,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       const bend = finger === 4 ? (joint === 1 ? 1 : 0.5) : (joint === 3 ? 0.5 : 1);
       fingers.push({ bone: child, rest: child.quaternion.clone(), finger, bend });
     });
-    return { tip, fingers };
+    return { tip, index, fingers };
   }, [scene]);
   const pose = useMemo(() => ({
     triangle: new Triangle(),
@@ -115,6 +117,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     y: new Vector3(),
     z: new Vector3(),
     fingertip: new Vector3(),
+    indexPad: new Vector3(),
     palmPad: new Vector3(),
     goal: new Vector3(),
     basis: new Matrix4(),
@@ -126,6 +129,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pressure: 0,
     curl: [...restCurls],
     palmMix: 0,
+    chinMix: 0,
     inputMotion: new Vector2(),
     drag: new Vector2(),
     dragged: false,
@@ -240,6 +244,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       pose.phase = 0;
       pose.clearance = 0;
       pose.palmMix = 0;
+      pose.chinMix = Number(pose.gesture === "chin");
     }
     pose.pressure = MathUtils.damp(pose.pressure, Number(active), active ? 19 : 13, step);
     const { gesture } = pose;
@@ -257,30 +262,37 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
 
     // Face the palm down over the head and back, and up under the chin.
     pose.view.subVectors(camera.position, pose.point).normalize();
-    pose.z.copy(pose.normal).multiplyScalar(chin ? 0.58 : 0.58 + 0.26 * pose.pressure).addScaledVector(pose.view, 0.62);
-    pose.z.addScaledVector(worldUp, chin ? -1.1 : 0.35 + 0.75 * highTouch).normalize();
+    const pettingBack = gesture === "back";
+    pose.z.copy(pose.normal).multiplyScalar(pettingBack ? 1.15 : chin ? 0.58 : 0.58 + 0.26 * pose.pressure);
+    pose.z.addScaledVector(pose.view, pettingBack ? 0.28 : 0.62);
+    pose.z.addScaledVector(worldUp, chin ? -1.1 : pettingBack ? 0.34 : 0.35 + 0.75 * highTouch).normalize();
     if (alongBack) {
-      // Reach in from the side with the wrist toward the shoulders, clear of the tail.
-      pose.y.copy(pose.view).negate().addScaledVector(pose.forward, -0.92);
+      // Reach across the back so the fingers do not point into the curled tail.
+      pose.y.copy(pose.view).negate();
+      pose.y.addScaledVector(pose.forward, pettingBack ? 0.60 : -0.92);
     } else {
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.48);
       // Keep the cuff clear of the face when the dog looks straight at the camera.
       const frontal = MathUtils.smoothstep(pose.forward.dot(pose.view), 0.84, 0.98);
       pose.x.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      pose.y.addScaledVector(pose.x, frontal * (chin ? 0.85 : 1.3));
-      pose.y.addScaledVector(worldUp, (chin ? 0.24 : 0.34) * highTouch);
+      pose.y.addScaledVector(pose.x, frontal * (chin ? 0.85 : 1.55));
+      pose.y.addScaledVector(worldUp, chin ? 0.24 * highTouch : 0.26 * highTouch - 1.55 * frontal);
     }
     pose.y.addScaledVector(pose.z, -pose.y.dot(pose.z)).normalize();
     pose.x.crossVectors(pose.y, pose.z);
     pose.rotation.setFromRotationMatrix(pose.basis.makeBasis(pose.x, pose.y, pose.z));
     pose.strokeDirection.set(pose.drag.x, pose.drag.y, 0).applyQuaternion(camera.quaternion);
     const restingPitch = chin ? -0.42 : -0.59;
-    const touchingPitch = chin ? -0.35 : alongBack ? -0.25 : MathUtils.lerp(-0.47, -0.31, crown);
+    const touchingPitch = chin ? -0.35 : alongBack ? (pettingBack ? -0.04 : -0.25) : MathUtils.lerp(-0.47, -0.31, crown);
     const wristMotion = (chin ? 0.045 * scratch : -0.068 * stroke) * pose.pressure;
     const pitch = MathUtils.lerp(restingPitch, touchingPitch, pose.pressure) + wristMotion - 0.064 * pose.strokeDirection.dot(pose.y);
     const roll = (chin ? 0.022 * scratch : 0.055 * pulse) * pose.pressure - 0.16 * pose.strokeDirection.dot(pose.x);
     pose.rotation.multiply(pose.offset.setFromAxisAngle(pitchAxis, pitch));
     pose.rotation.multiply(pose.offset.setFromAxisAngle(bendAxis, roll));
+    if (pettingBack) {
+      // Keep the lower, near edge of the palm resting on the curved back.
+      pose.rotation.multiply(pose.offset.setFromAxisAngle(worldUp, 0.24 * pose.pressure));
+    }
     if (appearing) {
       group.quaternion.copy(pose.rotation);
     } else {
@@ -298,6 +310,13 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       bone.quaternion.copy(rest).multiply(pose.offset);
     }
     rig.tip.getWorldPosition(pose.fingertip);
+    pose.chinMix = MathUtils.lerp(pose.chinMix, Number(chin), blend);
+    if (pose.chinMix > 0.001) {
+      rig.index.localToWorld(pose.indexPad.copy(indexPad));
+      const lead = 0.32 + 0.18 * Math.sin(phase + 0.45);
+      pose.fingertip.lerp(pose.indexPad, pose.chinMix * lead);
+    }
+    pose.z.set(0, 0, 1).applyQuaternion(group.quaternion);
     const aligned = MathUtils.smoothstep(pose.normal.dot(pose.z), 0.45, 0.84);
     // Lead with the finger pads along the cheeks and let the palm settle on flatter fur.
     const palmWeight = gesture === "head" ? palmContact.head * MathUtils.lerp(0.25, 1, crown) : palmContact[gesture];
@@ -338,8 +357,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       <group name="Player palm" scale={[1, 1, -1]}>
         <primitive object={scene} />
       </group>
-      <mesh position={[0, -0.041, 0]} scale={[1, 1, 0.71]}>
-        <cylinderGeometry args={[0.034, 0.044, 0.1, 20]} />
+      <mesh position={[0, -0.026, 0]} scale={[1, 1, 0.71]}>
+        <cylinderGeometry args={[0.034, 0.039, 0.07, 20]} />
         <meshStandardMaterial color="#7e8d78" roughness={1} />
       </mesh>
       <mesh position={[0, 0.011, 0]} scale={[1, 1, 0.67]}>
