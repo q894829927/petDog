@@ -29,7 +29,7 @@ type GameUI = {
   clearNotice: () => void;
 };
 
-const petMessages: Record<PetPart, string> = {
+export const petMessages: Record<PetPart, string> = {
   head: "团子低下头，凑近了你的手。",
   chin: "团子抬起下巴，让你再挠一会儿。",
   back: "团子回头看了看摸它的手。",

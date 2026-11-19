@@ -10,6 +10,7 @@ import {
   Quaternion,
   QuaternionKeyframeTrack,
   SkinnedMesh,
+  Vector2,
   Vector3,
   type AnimationAction,
   type Group,
@@ -19,7 +20,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
-import { useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
+import { petMessages, useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
 import { hitPetPart } from "./petTouch";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import {
@@ -48,6 +49,9 @@ const walkSpeed = 0.519 * dogScale;
 const runPlaybackRate = 0.7;
 const runSpeed = 1.1615 * 1.5 * dogScale * runPlaybackRate;
 const biteTime = 0.5;
+const petReactionCooldown = 400;
+const petRegionDwell = 90;
+const petRegionTravel = 8;
 const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap"];
 
 type FetchTrip = {
@@ -62,6 +66,12 @@ type FetchTrip = {
 };
 
 type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number; owner: number | null };
+
+type PetStroke = {
+  pointer: number;
+  part: PetPart;
+  next: { part: PetPart; screenPoint: Vector2; since: number } | null;
+};
 
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
   const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
@@ -135,6 +145,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   const trigger = useGameUI((state) => state.trigger);
   const tool = useGameUI((state) => state.tool);
   const lastPetAt = useRef(-Infinity);
+  const petStroke = useRef<PetStroke | null>(null);
   const brushing = useRef<{ pointer: number; startZ: number } | null>(null);
 
   const play = useCallback((name: string, time = 0) => {
@@ -276,6 +287,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   useEffect(() => {
     if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
     playback.current.interactionSequence = interaction.sequence;
+    if (interaction.kind !== "pet") petStroke.current = null;
     const owner = useCloudPet.getState().accountId;
     const sleeping = nap.current;
     if (sleeping) {
@@ -437,10 +449,31 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       return;
     }
 
+    const touch = handContact.current;
+    const stroke = petStroke.current;
+    const petting = tool === "pet" && touch?.pressed && stroke?.pointer === touch.pointer;
+    const next = stroke?.next;
+    if (petting && next && next.part === touch.gesture) {
+      const now = performance.now();
+      const travelX = (touch.screenPoint.x - next.screenPoint.x) * size.width * 0.5;
+      const travelY = (touch.screenPoint.y - next.screenPoint.y) * size.height * 0.5;
+      if (now - next.since >= petRegionDwell && now - lastPetAt.current >= petReactionCooldown &&
+          Math.hypot(travelX, travelY) >= petRegionTravel) {
+        stroke.part = next.part;
+        stroke.next = null;
+        lastPetAt.current = now;
+        // One press records one interaction. Further strokes only change the visible reaction.
+        play(petClips[next.part]);
+        useGameUI.getState().setNotice(petMessages[next.part]);
+        return;
+      }
+    }
+
     const activity = roaming.current;
     const ballPosition = toy?.position ?? ballStart;
     if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
     if (clip === "Idle") {
+      if (petting) return;
       activity.restTime -= step;
       if (activity.restTime > 0) return;
       const { accountId: owner, pet } = useCloudPet.getState();
@@ -505,14 +538,16 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   const pointerDown = (event: ThreeEvent<PointerEvent>) => {
     if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
+    petStroke.current = null;
     const part = hitPetPart(event, head);
     if (!part || (tool === "brush" && part !== "back")) return;
     event.stopPropagation();
     placeHand(event, tool === "brush" ? "brush" : part, true);
     if (tool === "pet") {
       const now = performance.now();
-      if (now - lastPetAt.current < 400) return;
+      if (now - lastPetAt.current < petReactionCooldown) return;
       lastPetAt.current = now;
+      petStroke.current = { pointer: event.pointerId, part, next: null };
       trigger("pet", part);
       return;
     }
@@ -532,6 +567,15 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     } else if ((!part || (tool === "brush" && !onBack)) && target?.pointer === event.pointerId) {
       handContact.current = null;
     }
+    const petting = petStroke.current;
+    if (tool === "pet" && petting?.pointer === event.pointerId) {
+      if (!pressed || !part || part === petting.part) {
+        petting.next = null;
+      } else if (part !== petting.next?.part) {
+        petting.next = { part, screenPoint: event.pointer.clone(), since: performance.now() };
+      }
+    }
+
     const stroke = brushing.current;
     if (!onBack || !dog.current || stroke?.pointer !== event.pointerId) return;
     const z = dog.current.worldToLocal(event.point.clone()).z;
@@ -541,6 +585,11 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   };
 
   const finishPointer = (event: ThreeEvent<PointerEvent>) => {
+    const petting = petStroke.current;
+    if (petting?.pointer === event.pointerId) {
+      if (event.type === "pointerout") petting.next = null;
+      else petStroke.current = null;
+    }
     if (brushing.current?.pointer === event.pointerId) brushing.current = null;
     const target = handContact.current;
     if (target?.pointer === event.pointerId && event.type !== "pointerup" && target.visibleUntil === Infinity) {
