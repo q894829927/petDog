@@ -13,7 +13,7 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
-import { useGameUI, type InteractionKind } from "../store/useGameUI";
+import { useGameUI, type InteractionKind, type MealKind } from "../store/useGameUI";
 import {
   ballClearance,
   ballGroundY,
@@ -22,19 +22,20 @@ import {
   clearsBall,
   hasRoomToRun,
   planFetch,
+  planMeal,
   rugSurface,
   type FetchPlan,
   type FloorPoint,
+  type WalkPlan,
 } from "./roomNavigation";
 
-const interactionClips: Record<Exclude<InteractionKind, "ball">, string> = {
+const interactionClips: Record<Exclude<InteractionKind, "ball" | MealKind>, string> = {
   pet: "Pet",
   call: "LookAround",
-  feed: "Eat",
-  water: "Drink",
   brush: "Pet",
 };
 
+const mealClips: Record<MealKind, string> = { feed: "Eat", water: "Drink" };
 const dogScale = 2.65;
 const turnSpeed = 3.7;
 // Root-motion distances measured from Walk_F_RM and Run_F_RM.
@@ -53,6 +54,8 @@ type FetchTrip = {
   flightTime: number;
   waypoint: number;
 };
+
+type Meal = WalkPlan & { kind: MealKind; waypoint: number };
 
 function face(group: Group, heading: number, turnStep: number) {
   const turn = MathUtils.euclideanModulo(heading - group.rotation.y + Math.PI, 2 * Math.PI) - Math.PI;
@@ -85,6 +88,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   const dog = useRef<Group>(null);
   const roaming = useRef<{ target: FloorPoint | null; restTime: number }>({ target: null, restTime: 1.7 });
   const fetch = useRef<FetchTrip | null>(null);
+  const meal = useRef<Meal | null>(null);
   const currentAction = useRef<AnimationAction | null>(null);
   const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
   const interaction = useGameUI((state) => state.interaction);
@@ -126,7 +130,15 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     play(playback.current.name, playback.current.time);
 
     const onFinished = ({ action }: { action: AnimationAction }) => {
-      if (action === currentAction.current && action.getClip().name !== "ReachBall") rest();
+      if (action !== currentAction.current || action.getClip().name === "ReachBall") return;
+      const dining = meal.current;
+      if (dining && action.getClip().name === mealClips[dining.kind]) {
+        meal.current = null;
+        const ui = useGameUI.getState();
+        ui.setBowl(dining.kind, 0);
+        ui.setNotice(dining.kind === "feed" ? "团子吃完了狗粮。" : "团子喝完了水。");
+      }
+      rest();
     };
     mixer.addEventListener("finished", onFinished);
     return () => {
@@ -145,8 +157,8 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
     playback.current.interactionSequence = interaction.sequence;
     const toy = ball.current;
+    const group = dog.current;
     if (interaction.kind === "ball") {
-      const group = dog.current;
       if (fetch.current || !group || !toy) return;
       const plan = planFetch(group.position, toy.position);
       if (!plan) {
@@ -166,13 +178,31 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
         flightTime: 0,
         waypoint: 0,
       };
+      meal.current = null;
       roaming.current.target = null;
       play("Idle");
       useGameUI.getState().setNotice("球抛出去了！");
       return;
     }
 
+    const kind = interaction.kind;
     const trip = fetch.current;
+    if (kind === "feed" || kind === "water") {
+      if (!group || meal.current?.kind === kind) return;
+      const floorBall = trip?.phase === "flight" ? trip.plan.pickup.ball : toy?.position ?? ballStart;
+      const plan = planMeal(group.position, floorBall);
+      const ui = useGameUI.getState();
+      if (!plan) {
+        ui.setNotice("团子还没找到走到碗边的路。");
+        return;
+      }
+      meal.current = { ...plan, waypoint: 0, kind };
+      ui.setBowl(kind, 3);
+      ui.setNotice(kind === "feed" ? "狗粮放好了，团子正往碗边走。" : "清水倒好了，团子正往碗边走。");
+    } else {
+      meal.current = null;
+    }
+
     if (trip?.phase === "flight") {
       trip.cancelled = true;
     } else {
@@ -180,7 +210,8 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       fetch.current = null;
     }
     roaming.current.target = null;
-    play(interactionClips[interaction.kind]);
+    if (kind === "feed" || kind === "water") play("Idle");
+    else play(interactionClips[kind]);
   }, [ball, interaction, play]);
 
   const holdBall = (toy: Mesh) => {
@@ -261,6 +292,31 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     const trip = fetch.current;
     if (trip && toy) {
       advanceFetch(trip, group, toy, action, step);
+      return;
+    }
+
+    const dining = meal.current;
+    if (dining) {
+      const target = dining.route[dining.waypoint];
+      const heading = target ? headingTo(group.position, target) : dining.heading;
+      if (target) {
+        const movement = play("Walk");
+        if (face(group, heading, turnSpeed * step) &&
+            moveToward(group.position, target, walkSpeed * step * movement.getEffectiveWeight())) {
+          dining.waypoint++;
+        }
+      } else if (action.getClip().name !== mealClips[dining.kind]) {
+        play("Idle");
+        if (face(group, heading, turnSpeed * step)) {
+          play(mealClips[dining.kind]);
+          useGameUI.getState().setNotice(dining.kind === "feed" ? "团子低下头，小口吃了起来。" : "团子正在碗边喝水。");
+        }
+      } else {
+        const consumed = MathUtils.clamp((action.time - 0.85) / (action.getClip().duration - 1.6), 0, 1);
+        const portions = Math.ceil(3 * (1 - consumed));
+        const ui = useGameUI.getState();
+        if (portions !== (ui.bowl?.portions ?? 0)) ui.setBowl(dining.kind, portions);
+      }
       return;
     }
 

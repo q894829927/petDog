@@ -44,9 +44,31 @@ function clearsRoomProps(start: FloorPoint, destination: FloorPoint, dogRadius: 
     clearsObstacle(start, destination, dogBed, dogBed.radius, dogRadius);
 }
 
-function routeTo(start: FloorPoint, destination: FloorPoint, dogRadius: number) {
-  if (clearsRoomProps(start, destination, dogRadius)) return [destination];
-  if (clearsRoomProps(start, rug, dogRadius) && clearsRoomProps(rug, destination, dogRadius)) return [rug, destination];
+function routeTo(start: FloorPoint, destination: FloorPoint, dogRadius: number, ball?: FloorPoint) {
+  const clear = (from: FloorPoint, to: FloorPoint) =>
+    clearsRoomProps(from, to, dogRadius) && (!ball || clearsBall(from, to, ball));
+  if (clear(start, destination)) return [destination];
+  for (const turn of [rug, { x: 0, z: -0.52 }, { x: 0, z: 0.91 }]) {
+    if (clear(start, turn) && clear(turn, destination)) return [turn, destination];
+  }
+  return null;
+}
+
+export type WalkPlan = { route: FloorPoint[]; heading: number };
+
+export function planMeal(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
+  // Approach the shallow bowl between the front paws, from the center of the rug.
+  for (const heading of [-Math.PI / 2, -1.25]) {
+    const point = (reach: number) => ({
+      x: foodBowl.x - Math.sin(heading) * reach,
+      z: foodBowl.z - Math.cos(heading) * reach,
+    });
+    const stop = point(1.18);
+    if (Math.hypot(start.x - stop.x, start.z - stop.z) < 0.02) return { route: [], heading };
+    const entry = point(foodBowl.radius + dogClearance + 0.04);
+    const route = routeTo(start, entry, dogClearance, ball);
+    if (route && clearsBall(entry, stop, ball)) return { route: [...route, stop], heading };
+  }
   return null;
 }
 
