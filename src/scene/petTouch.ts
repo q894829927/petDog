@@ -1,44 +1,52 @@
-import { Matrix4, SkinnedMesh, Triangle, Vector3, Vector4, type Camera, type Intersection, type Object3D, type Vector2 } from "three";
-import type { PetPart } from "../store/useGameUI";
+import { Matrix4, SkinnedMesh, Triangle, Vector3, Vector4, type Camera, type Intersection, type Vector2 } from "three";
+import type { PetTarget } from "../store/useGameUI";
 
-const headBones = /^(head|mouth|nose|tongue_|eye_|Ear_)/;
+const faceBones = /^(head|mouth|nose|tongue_|eye_)/;
+const legBones = /^(hip|thigh|leg|shin|foot|claws)_/;
 const touchRadius = 10;
 const cameraForward = new Vector3(0, 0, -1);
 
-export function hitPetPart(
-  { object, face, point, barycoord }: Pick<Intersection, "object" | "face" | "point" | "barycoord">,
-  head: Object3D,
-): PetPart | null {
+export function hitPetTarget(
+  { object, face, barycoord }: Pick<Intersection, "object" | "face" | "barycoord">,
+): PetTarget | null {
   if (!(object instanceof SkinnedMesh) || !face || !barycoord) return null;
 
-  // Interpolate the anatomical regions at the actual hit inside the skinned triangle.
-  const { skinIndex, skinWeight } = object.geometry.attributes;
+  // Both Akita meshes share the same bind pose (Y up, Z forward). Classify the
+  // barycentric point there so the region follows the fur even as it deforms.
+  const { position, skinIndex, skinWeight } = object.geometry.attributes;
   const vertices = [face.a, face.b, face.c];
-  let headWeight = 0;
-  let spineWeight = 0;
-  let spineHeight = 0;
+  let x = 0, y = 0, z = 0;
+  let muzzle = 0, ears = 0, neck = 0, trunk = 0, legs = 0, tail = 0;
   for (let corner = 0; corner < vertices.length; corner++) {
     const vertex = vertices[corner];
     const portion = barycoord.getComponent(corner);
+    x += position.getX(vertex) * portion;
+    y += position.getY(vertex) * portion;
+    z += position.getZ(vertex) * portion;
     for (let component = 0; component < 4; component++) {
       const weight = portion * skinWeight.getComponent(vertex, component);
       if (weight <= 0) continue;
-      const bone = object.skeleton.bones[skinIndex.getComponent(vertex, component)];
-      if (headBones.test(bone.name)) {
-        headWeight += weight;
-      } else if (bone.name.startsWith("Spine_")) {
-        spineWeight += weight;
-        spineHeight += bone.matrixWorld.elements[13] * weight;
-      }
+      const { name } = object.skeleton.bones[skinIndex.getComponent(vertex, component)];
+      if (name.startsWith("Ear_")) ears += weight;
+      else if (faceBones.test(name)) muzzle += weight;
+      else if (name === "neck") neck += weight;
+      else if (name.startsWith("Spine_")) trunk += weight;
+      else if (legBones.test(name)) legs += weight;
+      else if (name.startsWith("tail_")) tail += weight;
     }
   }
 
-  if (headWeight > 0.5) {
-    const hit = head.worldToLocal(new Vector3().copy(point));
-    return hit.y < -0.0002 && hit.z < -0.00055 ? "chin" : "head";
+  const side = x >= 0 ? "L" : "R";
+  if (ears >= 0.29) return { part: "ear", side };
+  if (muzzle + ears >= 0.5) {
+    if (y < 0.455 && z > 0.312) return { part: "chin" };
+    if (y < 0.526 && (z > 0.314 || Math.abs(x) > 0.053)) return { part: "cheek", side };
+    return { part: "head" };
   }
-  if (spineWeight > 0.5 && point.y * spineWeight > spineHeight) return "back";
-  return null;
+  if (tail >= 0.5 || (y < 0.315 && (legs > 0.48 || z < 0.12))) return null;
+  if (neck >= 0.45 || (z > 0.148 && y < 0.45)) return { part: "chest", side };
+  if (y > 0.425 && trunk + neck > 0.39) return { part: "back", side };
+  return { part: "flank", side };
 }
 
 export function createNearbyTouchPicker() {

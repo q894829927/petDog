@@ -2,20 +2,19 @@ import { useMemo, useRef, type RefObject } from "react";
 import { useFrame, useLoader } from "@react-three/fiber";
 import {
   Bone, MathUtils, Matrix4, Mesh, Quaternion, Raycaster, Triangle, Vector2, Vector3,
-  type Group, type Material, type Object3D, type SkinnedMesh,
+  type Group, type Material, type SkinnedMesh,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import playerHandUrl from "../assets/player-hand.glb?url";
 import { useGameUI, type PetPart } from "../store/useGameUI";
 import { createHandClearance } from "./handClearance";
-import { hitPetPart } from "./petTouch";
+import { hitPetTarget } from "./petTouch";
 
 export type HandGesture = PetPart | "brush";
 
 export type HandContact = {
   dog: Group;
   mesh: SkinnedMesh;
-  head: Object3D;
   vertices: readonly [number, number, number];
   weights: Vector3;
   pointer: number;
@@ -36,8 +35,13 @@ const combToothTip = new Vector3(-0.014, 0.179, -0.074);
 const combToothLength = 0.036;
 const fingerNames = ["index", "middle", "ring", "pinky", "thumb"];
 const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
-const thumbCurls: Record<HandGesture, number> = { head: 0.105, chin: 0.22, back: 0.105, brush: 0.3 };
-const palmContact: Record<HandGesture, number> = { head: 0.3, chin: 0, back: 0.82, brush: 0 };
+type HandPose = "head" | "chin" | "back" | "side" | "fingertips" | "brush";
+const handPose: Record<HandGesture, HandPose> = {
+  head: "head", ear: "fingertips", cheek: "fingertips", chin: "chin",
+  chest: "side", back: "back", flank: "side", brush: "brush",
+};
+const thumbCurls: Record<HandPose, number> = { head: 0.105, chin: 0.22, back: 0.105, side: 0.12, fingertips: 0.22, brush: 0.3 };
+const palmContact: Record<HandPose, number> = { head: 0.3, chin: 0, back: 0.82, side: 0.76, fingertips: 0, brush: 0 };
 const contactGrace = 0.11;
 const touchContactGrace = 0.18;
 const reachTime = 0.15;
@@ -71,13 +75,16 @@ function handMaterials(group: Group, comb: Group) {
   return { skin, tool };
 }
 
-function fingerCurl(gesture: HandGesture, finger: number, phase: number, stroke: number) {
+function fingerCurl(gesture: HandPose, finger: number, phase: number, stroke: number) {
   if (finger === 4) return thumbCurls[gesture];
   switch (gesture) {
     case "chin":
       return finger < 2 ? 0.23 + 0.19 * Math.sin(phase + finger * 2.45) : 0.47 + finger * 0.034;
     case "back":
+    case "side":
       return 0.10 + finger * 0.022 + 0.036 * stroke;
+    case "fingertips":
+      return finger < 2 ? 0.16 + finger * 0.04 + 0.05 * stroke : 0.46 + finger * 0.04;
     case "brush":
       return 0.36 + finger * 0.035;
     case "head":
@@ -135,7 +142,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pressure: 0,
     curl: [...restCurls],
     palmMix: 0,
-    chinMix: 0,
+    tipMix: 0,
     combMix: 0,
     inputMotion: new Vector2(),
     drag: new Vector2(),
@@ -184,7 +191,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
           pose.ray.setFromCamera(previous.screenPoint, camera);
           const hit = pose.ray.intersectObject(previous.mesh, false)[0];
           if (hit?.face && hit.barycoord) {
-            const part = hitPetPart(hit, previous.head);
+            const part = hitPetTarget(hit)?.part;
             if (part && (tool === "pet" || part === "back")) {
               previous.vertices = [hit.face.a, hit.face.b, hit.face.c];
               previous.weights = hit.barycoord;
@@ -253,11 +260,13 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       pose.phase = 0;
       pose.clearance = 0;
       pose.palmMix = 0;
-      pose.chinMix = Number(pose.gesture === "chin");
+      pose.tipMix = 0;
     }
     pose.pressure = MathUtils.damp(pose.pressure, Number(active), active ? 19 : 13, step);
-    const { gesture } = pose;
+    const gesture = handPose[pose.gesture];
     const chin = gesture === "chin";
+    const fingertips = gesture === "fingertips";
+    const pettingSide = gesture === "side";
     const brushing = gesture === "brush";
     const alongBack = gesture === "back" || brushing;
     pose.combMix = MathUtils.lerp(pose.combMix, Number(brushing), appearing ? 1 : blend);
@@ -275,14 +284,21 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     // Face the palm down over the head and back, and up under the chin.
     pose.view.subVectors(camera.position, pose.point).normalize();
     const pettingBack = gesture === "back";
-    pose.z.copy(pose.normal).multiplyScalar(alongBack ? 1.15 : chin ? 0.58 : 0.58 + 0.26 * pose.pressure);
-    pose.z.addScaledVector(pose.view, alongBack ? 0.28 : 0.62);
-    pose.z.addScaledVector(worldUp, chin ? -1.1 : alongBack ? 0.34 : 0.35 + 0.75 * highTouch).normalize();
+    if (pettingSide || fingertips) {
+      pose.z.copy(pose.normal).multiplyScalar(1.35).addScaledVector(pose.view, 0.38).addScaledVector(worldUp, 0.22).normalize();
+    } else {
+      pose.z.copy(pose.normal).multiplyScalar(alongBack ? 1.15 : chin ? 0.58 : 0.58 + 0.26 * pose.pressure);
+      pose.z.addScaledVector(pose.view, alongBack ? 0.28 : 0.62);
+      pose.z.addScaledVector(worldUp, chin ? -1.1 : alongBack ? 0.34 : 0.35 + 0.75 * highTouch).normalize();
+    }
     if (brushing) {
       // Point the teeth across the coat, with the grip following the stroke.
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.43);
     } else if (pettingBack) {
       pose.y.copy(pose.view).negate().addScaledVector(pose.forward, 0.60);
+    } else if (pettingSide || fingertips) {
+      // A high wrist keeps the fingers clear of the muzzle and the low part of the room.
+      pose.y.copy(worldUp).negate().addScaledVector(pose.forward, -0.48).addScaledVector(pose.view, -0.27);
     } else {
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.48);
       // Keep the cuff clear of the face when the dog looks straight at the camera.
@@ -296,7 +312,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.rotation.setFromRotationMatrix(pose.basis.makeBasis(pose.x, pose.y, pose.z));
     pose.strokeDirection.set(pose.drag.x, pose.drag.y, 0).applyQuaternion(camera.quaternion);
     const restingPitch = chin || brushing ? -0.42 : -0.59;
-    const touchingPitch = chin ? -0.35 : alongBack ? (brushing ? -0.1 : -0.04) : MathUtils.lerp(-0.47, -0.31, crown);
+    const touchingPitch = chin ? -0.35 : brushing ? -0.1 : alongBack || pettingSide || fingertips ? -0.04 : MathUtils.lerp(-0.47, -0.31, crown);
     const wristMotion = (chin ? 0.045 * scratch : -0.068 * stroke) * pose.pressure;
     const pitch = MathUtils.lerp(restingPitch, touchingPitch, pose.pressure) + wristMotion - 0.064 * pose.strokeDirection.dot(pose.y);
     const roll = (chin ? 0.022 * scratch : 0.055 * pulse) * pose.pressure - 0.16 * pose.strokeDirection.dot(pose.x);
@@ -323,11 +339,11 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       bone.quaternion.copy(rest).multiply(pose.offset);
     }
     rig.tip.getWorldPosition(pose.fingertip);
-    pose.chinMix = MathUtils.lerp(pose.chinMix, Number(chin), blend);
-    if (pose.chinMix > 0.001) {
+    const tipWeight = chin ? 0.32 + 0.18 * Math.sin(phase + 0.45) : fingertips ? 0.8 : 0;
+    pose.tipMix = MathUtils.lerp(pose.tipMix, tipWeight, blend);
+    if (pose.tipMix > 0.001) {
       rig.index.localToWorld(pose.indexPad.copy(indexPad));
-      const lead = 0.32 + 0.18 * Math.sin(phase + 0.45);
-      pose.fingertip.lerp(pose.indexPad, pose.chinMix * lead);
+      pose.fingertip.lerp(pose.indexPad, pose.tipMix);
     }
     pose.z.set(0, 0, 1).applyQuaternion(group.quaternion);
     const aligned = MathUtils.smoothstep(pose.normal.dot(pose.z), 0.45, 0.84);
@@ -347,9 +363,9 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     }
     pose.outward.lerp(pose.nextOutward.normalize(), appearing ? 1 : blend).normalize();
     pose.goal.copy(pose.point);
-    if (gesture === "head" || gesture === "back") {
+    if (gesture === "head" || gesture === "back" || pettingSide || fingertips) {
       pose.strokeDirection.copy(pose.forward).addScaledVector(pose.normal, -pose.forward.dot(pose.normal));
-      pose.goal.addScaledVector(pose.strokeDirection, -(gesture === "back" ? 0.068 : 0.035) * pulse * pose.pressure);
+      pose.goal.addScaledVector(pose.strokeDirection, -(fingertips ? 0.018 : gesture === "back" ? 0.068 : 0.035) * pulse * pose.pressure);
     }
     const retreat = 0.42 * (1 - MathUtils.smoothstep(pose.reach, 0, 1));
     pose.goal.addScaledVector(pose.outward, MathUtils.lerp(0.052, 0.008, pose.pressure));

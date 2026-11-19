@@ -20,8 +20,9 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
-import { petMessages, useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
-import { hitPetPart } from "./petTouch";
+import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
+import { createPetReactions } from "./petReactions";
+import { hitPetTarget } from "./petTouch";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import {
   ballClearance,
@@ -40,7 +41,6 @@ import {
   type WalkPlan,
 } from "./roomNavigation";
 
-const petClips: Record<PetPart, string> = { head: "Pet", chin: "LiftChin", back: "LookAround" };
 const mealClips: Record<MealKind, string> = { feed: "Eat", water: "Drink" };
 const dogScale = 2.65;
 const turnSpeed = 3.7;
@@ -70,9 +70,13 @@ type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number; 
 
 type PetStroke = {
   pointer: number;
-  part: PetPart;
-  next: { part: PetPart; screenPoint: Vector2; since: number } | null;
+  target: PetTarget;
+  next: { target: PetTarget; screenPoint: Vector2; since: number } | null;
 };
+
+function samePetTarget(a: PetTarget, b: PetTarget | undefined) {
+  return a.part === b?.part && a.side === b.side;
+}
 
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
   const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
@@ -126,6 +130,11 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     return [...assetClips, chin, brush];
   }, [assetClips]);
   const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
+  const reactions = useMemo(() => {
+    const lookAround = AnimationClip.findByName(assetClips, "LookAround");
+    if (!lookAround) throw new Error("Akita animation missing: LookAround");
+    return createPetReactions(mixer, lookAround);
+  }, [assetClips, mixer]);
   const head = useMemo(() => {
     const bone = scene.getObjectByName("head");
     if (!bone) throw new Error("Akita head bone missing");
@@ -176,6 +185,19 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     play("Idle");
   }, [play]);
 
+  const reactToPet = useCallback((target: PetTarget) => {
+    const base = currentAction.current?.getClip().name;
+    const authored = target.part === "head" ? "Pet" : target.part === "chin" ? "LiftChin" : null;
+    if (authored && base !== "Sit") {
+      reactions.fade();
+      play(authored);
+      return;
+    }
+    if (base !== "Sit" && base !== "Idle") play("Idle");
+    roaming.current.restTime = Math.max(roaming.current.restTime, 1.8);
+    reactions.play(target);
+  }, [play, reactions]);
+
   useEffect(() => {
     handContact.current = null;
     scene.traverse((child) => {
@@ -213,6 +235,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const toy = ball.current;
     const group = dog.current;
     const { pet } = useCloudPet.getState();
+    if (interaction.kind !== "pet") reactions.fade();
     if (interaction.kind === "ball") {
       if (fetch.current || !group || !toy) return;
       if (pet && pet.energy < 8) {
@@ -280,10 +303,11 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (kind === "call") play("LookAround");
     else if (kind === "feed" || kind === "water") play("Idle");
     else {
-      play(kind === "brush" ? "Brush" : petClips[interaction.part]);
+      if (kind === "brush") play("Brush");
+      else reactToPet(interaction);
       recordPetAction(kind, owner);
     }
-  }, [ball, play]);
+  }, [ball, play, reactions, reactToPet]);
 
   useEffect(() => {
     if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
@@ -454,18 +478,18 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const stroke = petStroke.current;
     const petting = tool === "pet" && touch?.pressed && stroke?.pointer === touch.pointer;
     const next = stroke?.next;
-    if (petting && next && next.part === touch.gesture) {
+    if (petting && next && next.target.part === touch.gesture) {
       const now = performance.now();
       const travelX = (touch.screenPoint.x - next.screenPoint.x) * size.width * 0.5;
       const travelY = (touch.screenPoint.y - next.screenPoint.y) * size.height * 0.5;
       if (now - next.since >= petRegionDwell && now - lastPetAt.current >= petReactionCooldown &&
           Math.hypot(travelX, travelY) >= petRegionTravel) {
-        stroke.part = next.part;
+        stroke.target = next.target;
         stroke.next = null;
         lastPetAt.current = now;
         // One press records one interaction. Further strokes only change the visible reaction.
-        play(petClips[next.part]);
-        useGameUI.getState().setNotice(petMessages[next.part]);
+        reactToPet(next.target);
+        useGameUI.getState().setNotice(petMessages[next.target.part]);
         return;
       }
     }
@@ -530,7 +554,6 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     handContact.current = {
       dog: dog.current,
       mesh: object,
-      head,
       vertices: [face.a, face.b, face.c],
       weights: barycoord,
       pointer: event.pointerId,
@@ -547,16 +570,16 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
     petStroke.current = null;
     brushing.current = null;
-    const part = hitPetPart(event, head);
-    if (!part || (tool === "brush" && part !== "back")) return;
+    const target = hitPetTarget(event);
+    if (!target || (tool === "brush" && target.part !== "back")) return;
     event.stopPropagation();
-    placeHand(event, tool === "brush" ? "brush" : part, true);
+    placeHand(event, tool === "brush" ? "brush" : target.part, true);
     if (tool === "pet") {
       const now = performance.now();
       if (now - lastPetAt.current < petReactionCooldown) return;
       lastPetAt.current = now;
-      petStroke.current = { pointer: event.pointerId, part, next: null };
-      trigger("pet", part);
+      petStroke.current = { pointer: event.pointerId, target, next: null };
+      trigger("pet", target);
       return;
     }
     if (!dog.current) return;
@@ -566,7 +589,8 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {
     if (!event.isPrimary || tool === "ball") return;
-    const part = hitPetPart(event, head);
+    const picked = hitPetTarget(event);
+    const part = picked?.part;
     const onBack = tool === "brush" && part === "back";
     const pressed = (event.buttons & 1) !== 0;
     const target = handContact.current;
@@ -577,10 +601,10 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     }
     const petting = petStroke.current;
     if (tool === "pet" && petting?.pointer === event.pointerId) {
-      if (!pressed || !part || part === petting.part) {
+      if (!pressed || !picked || samePetTarget(picked, petting.target)) {
         petting.next = null;
-      } else if (part !== petting.next?.part) {
-        petting.next = { part, screenPoint: event.pointer.clone(), since: performance.now() };
+      } else if (!samePetTarget(picked, petting.next?.target)) {
+        petting.next = { target: picked, screenPoint: event.pointer.clone(), since: performance.now() };
       }
     }
 
@@ -593,7 +617,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const z = dog.current.worldToLocal(event.point.clone()).z;
     if ((stroke.startZ - z) * dogScale < brushStrokeLength) return;
     brushing.current = null;
-    trigger("brush", "back");
+    trigger("brush", { part: "back" });
   };
 
   const finishPointer = (event: ThreeEvent<PointerEvent>) => {
