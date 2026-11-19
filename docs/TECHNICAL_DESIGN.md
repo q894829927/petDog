@@ -6,7 +6,7 @@
 
 ## 当前 UI 设计基线
 
-2026-11：确定 [Warm Flat 全屏 HUD 规范](UI_DESIGN_BASELINE.md)。当前仓库中已实现前端 R3F 场景、程序化柴犬原型、交互工具与低频 Zustand UI 状态。场景动画通过 useFrame/ref 更新。服务端 API、GLB 动画、真实存档尚未实现；不将 UI 演示数值当作服务端数据。
+2026-11 确定 [Warm Flat 全屏 HUD 规范](UI_DESIGN_BASELINE.md)。当前前端已实现 R3F 房间、Akita 骨骼动画、交互工具与低频 Zustand UI 状态。动画通过 `useFrame` 更新。服务端 API 和真实存档待实现，HUD 显示演示数值。
 
 ## 1. 总体架构
 
@@ -279,6 +279,16 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 动画应允许合理混合，例如尾巴动作与待机动作叠加。若模型没有独立表情骨骼，首版使用头部、耳朵、身体姿态和音效表达情绪。
 
 模型交付需要检查骨骼命名、根骨骼方向、动作循环、动画时长、材质贴图和 GLB 文件体积。
+
+### 11.1 Akita 原型
+
+默认的「标准」画质使用 Dogs_Big_pack 的 `Mesh_Akita` 和材质 `M_Akita_color`。「省电」画质使用 `Mesh_Akita_LowPoly` 和材质 `M_Akita_color_M`。两种模型均通过 Unreal glTF Exporter 转为内嵌贴图的 GLB，共用同一组骨骼动画。Web 使用 `GLTFLoader` 按画质加载模型，通过 `AnimationMixer` 混合待机和互动动作。
+
+- `Idle_1` 用于待机，`Idle_2` 用于呼唤，`Idle_3` 用于抚摸与梳毛。
+- `Jump_place` 用于玩球时的原地跳跃。
+- `Eat_loop` 和 `Drink_loop` 各自与 `EatDrink_start`、`EatDrink_end` 合成一段动作。
+- 自主活动会在地毯内随机选取落脚点。选点时为身体留出空间，并检查整段路线能否避开碗、狗窝和球。步行使用 `Walk_F_IP`，按对应根运动 `Walk_F_RM` 的步幅移动。到达后可以站立待机，也可以播放由 `Sitting_start`、`Sitting_loop` 和 `Sitting_end` 合成的坐下休息动作。
+- 球挡住路线时宠物会停下并重新选点。玩家互动会中断走动或休息，动画回应结束后先待机，再选取新的落脚点。
 
 ## 12. 测试策略
 

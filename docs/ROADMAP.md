@@ -4,7 +4,7 @@
 
 ## P0：项目骨架与柴犬原型
 
-UI 设计基线参见 [UI_DESIGN_BASELINE.md](UI_DESIGN_BASELINE.md)，已落地程序化 3D 柴犬占位模型，正式 GLB 动画与自主行为逻辑仍未完成。
+UI 设计基线参见 [UI_DESIGN_BASELINE.md](UI_DESIGN_BASELINE.md)。当前用 Akita 资产验证 GLB 模型和骨骼动画，支持在地毯内随机选点走动、避开道具、待机和坐下。正式柴犬资源待接入。
 
 目标：浏览器中出现一只可观察、可互动的柴犬。
 

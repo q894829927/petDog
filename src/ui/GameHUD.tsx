@@ -42,9 +42,9 @@ function StatRings() {
 }
 
 const toolHint: Record<ToolMode, string> = {
-  pet: "直接触摸柴犬，轻轻摸摸它",
-  ball: "点击柴犬或地面，试着把球抛出去",
-  brush: "轻触柴犬，给它梳梳毛",
+  pet: "轻触团子，摸摸它",
+  ball: "点击团子或地面，把球抛出去",
+  brush: "轻触团子，给它梳梳毛",
 };
 
 function InteractionDock() {
@@ -98,7 +98,7 @@ function DetailsPanel() {
         {panel === "profile" ? (
           <div className="profile-content">
             <div className="profile-portrait"><Icon name="paw" size={37}/></div>
-            <p className="profile-name">团子 <span>柴犬</span></p>
+            <p className="profile-name">团子 <span>秋田犬</span></p>
             <div className="profile-grid">
               <div><small>年龄</small><strong>12 天</strong></div>
               <div><small>性格</small><strong>活泼</strong></div>
@@ -111,10 +111,10 @@ function DetailsPanel() {
           <div className="settings-content">
             <p className="setting-label">场景画质</p>
             <div className="segmented" role="group" aria-label="场景画质">
-              <button type="button" className={quality === "high" ? "selected" : ""} onClick={() => setQuality("high")}>标准</button>
-              <button type="button" className={quality === "low" ? "selected" : ""} onClick={() => setQuality("low")}>省电</button>
+              <button type="button" className={quality === "high" ? "selected" : ""} aria-pressed={quality === "high"} onClick={() => setQuality("high")}>标准</button>
+              <button type="button" className={quality === "low" ? "selected" : ""} aria-pressed={quality === "low"} onClick={() => setQuality("low")}>省电</button>
             </div>
-            <p className="modal-note">画质切换会调整渲染精度与阴影。音效、账号登录、云端存档和退出登录将在后续版本开放。</p>
+            <p className="modal-note">标准使用高模和阴影。省电使用低模、降低渲染精度并关闭阴影。音效、账号登录、云端存档和退出登录将在后续版本开放。</p>
             <a href="/" className="settings-back"><Icon name="back" size={17}/> 返回游戏大厅</a>
           </div>
         )}
@@ -148,7 +148,7 @@ export function GameHUD() {
       <header className="hud-top">
         <button type="button" className="pet-profile-pill glass" onClick={() => setPanel(panel === "profile" ? null : "profile")} aria-label="查看团子的档案">
           <span className="profile-avatar"><Icon name="paw" size={21}/></span>
-          <span className="profile-titles"><strong>团子 <Icon name="chevron" size={13}/></strong><small>柴犬 · ♥ Lv.3</small></span>
+          <span className="profile-titles"><strong>团子 <Icon name="chevron" size={13}/></strong><small>秋田犬 · ♥ Lv.3</small></span>
         </button>
         <StatRings />
         <div className="hud-system">
