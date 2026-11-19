@@ -81,6 +81,8 @@ type PetStroke = {
 
 type PendingInteraction = { interaction: Interaction; owner: number | null };
 
+type PokeReaction = { target: PetTarget; phase: "contact" | "recoil" | "turn"; time: number };
+
 type Recline = {
   phase: "turn" | "down" | "hold" | "up";
   heading: number;
@@ -184,7 +186,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   const petStroke = useRef<PetStroke | null>(null);
   const brushing = useRef<{ pointer: number; startZ: number } | null>(null);
   const rearTap = useRef<{ pointer: number; x: number; y: number; startedAt: number } | null>(null);
-  const pokeCue = useRef<{ target: PetTarget; time: number } | null>(null);
+  const pokeCue = useRef<PokeReaction | null>(null);
 
   const play = useCallback((name: string, time = 0) => {
     const clip = AnimationClip.findByName(animations, name);
@@ -336,7 +338,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (kind === "poke") {
       if (currentAction.current?.getClip().name !== "Sit") play("Idle");
       roaming.current.restTime = 1.8;
-      pokeCue.current = { target: interaction, time: 0.21 };
+      pokeCue.current = { target: interaction, phase: "contact", time: 0.21 };
     } else if (kind === "call") play("LookAround");
     else if (kind === "feed" || kind === "water") play("Idle");
     else {
@@ -495,17 +497,31 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const toy = ball.current;
     const clip = action.getClip().name;
     const cue = pokeCue.current;
-    if (cue) {
-      if (tool !== "pet" || handContact.current?.gesture !== "poke") {
-        pokeCue.current = null;
-      } else {
+    if (cue?.phase === "contact") {
+      if (tool !== "pet" || handContact.current?.gesture !== "poke") pokeCue.current = null;
+      else {
         cue.time -= step;
         if (cue.time <= 0) {
           reactions.play(cue.target);
           useGameUI.getState().setNotice(petMessages.poke);
-          pokeCue.current = null;
+          cue.phase = "recoil";
+          cue.time = 0.48;
         }
       }
+    } else if (cue?.phase === "recoil") {
+      cue.time -= step;
+      if (cue.time <= 0 && !fetch.current) {
+        reactions.fade();
+        cue.phase = "turn";
+        play("Walk");
+      }
+    } else if (cue?.phase === "turn") {
+      if (face(group, headingTo(group.position, camera.position), turnSpeed * step)) {
+        pokeCue.current = null;
+        rest();
+        useGameUI.getState().setNotice("团子转过身，面向你站好了。");
+      }
+      return;
     }
     const sleeping = nap.current;
     if (sleeping) {
