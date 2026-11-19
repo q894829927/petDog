@@ -3,9 +3,13 @@ import { useFrame, useLoader, type ThreeEvent } from "@react-three/fiber";
 import {
   AnimationClip,
   AnimationMixer,
+  AnimationUtils,
   LoopOnce,
   MathUtils,
   Mesh,
+  Quaternion,
+  QuaternionKeyframeTrack,
+  Vector3,
   type AnimationAction,
   type Group,
   type PerspectiveCamera,
@@ -13,7 +17,8 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
-import { useGameUI, type InteractionKind, type MealKind } from "../store/useGameUI";
+import { useGameUI, type MealKind, type PetPart } from "../store/useGameUI";
+import { hitPetPart } from "./petTouch";
 import {
   ballClearance,
   ballGroundY,
@@ -30,11 +35,7 @@ import {
   type WalkPlan,
 } from "./roomNavigation";
 
-const interactionClips: Record<Exclude<InteractionKind, "ball" | "call" | MealKind>, string> = {
-  pet: "Pet",
-  brush: "Pet",
-};
-
+const petClips: Record<PetPart, string> = { head: "Pet", chin: "LiftChin", back: "LookAround" };
 const mealClips: Record<MealKind, string> = { feed: "Eat", water: "Drink" };
 const dogScale = 2.65;
 const turnSpeed = 3.7;
@@ -57,6 +58,28 @@ type FetchTrip = {
 
 type Approach = WalkPlan & { kind: MealKind | "call"; waypoint: number };
 
+function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
+  const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
+  const trackIndex = clip.tracks.findIndex(({ name }) => name === bone + ".quaternion");
+  const track = clip.tracks[trackIndex] as QuaternionKeyframeTrack | undefined;
+  if (!track) throw new Error("Missing Akita rotation track: " + bone);
+  const neutral = track.InterpolantFactoryMethodLinear();
+  const rotation = new Quaternion();
+  const offset = new Quaternion();
+  const times = [];
+  const values: number[] = [];
+  for (let key = 0; key <= 38; key++) {
+    const phase = key / 38;
+    const time = clip.duration * phase;
+    times.push(time);
+    rotation.fromArray(neutral.evaluate(time));
+    offset.setFromAxisAngle(axis, angleAt(phase));
+    rotation.multiply(offset).toArray(values, key * 4);
+  }
+  clip.tracks[trackIndex] = new QuaternionKeyframeTrack(track.name, times, values);
+  return clip;
+}
+
 function face(group: Group, heading: number, turnStep: number) {
   const turn = MathUtils.euclideanModulo(heading - group.rotation.y + Math.PI, 2 * Math.PI) - Math.PI;
   group.rotation.y += MathUtils.clamp(turn, -turnStep, turnStep);
@@ -78,7 +101,14 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
 export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   const quality = useGameUI((state) => state.quality);
   const modelQuality = useDeferredValue(quality);
-  const { scene, animations } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
+  const { scene, animations: assetClips } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
+  const animations = useMemo(() => {
+    const idle = AnimationClip.findByName(assetClips, "Idle");
+    if (!idle) throw new Error("Akita animation missing: Idle");
+    const chin = touchClip(idle, "LiftChin", "head", new Vector3(1, 0, 0), (t) => 0.42 * Math.sin(Math.PI * t));
+    const brush = touchClip(idle, "Brush", "tail_01", new Vector3(0, 1, 0), (t) => 0.58 * Math.sin(6 * Math.PI * t) * Math.sin(Math.PI * t));
+    return [...assetClips, chin, brush];
+  }, [assetClips]);
   const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
   const head = useMemo(() => {
     const bone = scene.getObjectByName("head");
@@ -95,6 +125,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   const trigger = useGameUI((state) => state.trigger);
   const tool = useGameUI((state) => state.tool);
   const lastPetAt = useRef(-Infinity);
+  const brushing = useRef<{ pointer: number; startZ: number } | null>(null);
 
   const play = useCallback((name: string, time = 0) => {
     const clip = AnimationClip.findByName(animations, name);
@@ -219,7 +250,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     roaming.current.target = null;
     if (kind === "call") play("LookAround");
     else if (kind === "feed" || kind === "water") play("Idle");
-    else play(interactionClips[kind]);
+    else play(kind === "brush" ? "Brush" : petClips[interaction.part]);
   }, [ball, interaction, play]);
 
   const holdBall = (toy: Mesh) => {
@@ -371,15 +402,36 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
 
   const reactToClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (tool === "ball" || tool === "brush") {
-      trigger(tool);
+    if (tool === "ball") {
+      trigger("ball");
       return;
     }
+    if (tool === "brush") return;
 
     const now = performance.now();
     if (now - lastPetAt.current < 400) return;
     lastPetAt.current = now;
-    trigger("pet");
+    trigger("pet", hitPetPart(event, head) ?? "head");
+  };
+
+  const startBrush = (event: ThreeEvent<PointerEvent>) => {
+    if (tool !== "brush" || !dog.current || hitPetPart(event, head) !== "back") return;
+    event.stopPropagation();
+    const startZ = dog.current.worldToLocal(event.point.clone()).z;
+    brushing.current = { pointer: event.pointerId, startZ };
+  };
+
+  const brushBack = (event: ThreeEvent<PointerEvent>) => {
+    const stroke = brushing.current;
+    if (tool !== "brush" || !dog.current || stroke?.pointer !== event.pointerId || hitPetPart(event, head) !== "back") return;
+    const z = dog.current.worldToLocal(event.point.clone()).z;
+    if (Math.abs(z - stroke.startZ) * dogScale < 0.3) return;
+    brushing.current = null;
+    trigger("brush");
+  };
+
+  const endBrush = (event: ThreeEvent<PointerEvent>) => {
+    if (brushing.current?.pointer === event.pointerId) brushing.current = null;
   };
 
   return (
@@ -389,6 +441,11 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       rotation={[0, -0.65, 0]}
       scale={dogScale}
       onClick={reactToClick}
+      onPointerDown={startBrush}
+      onPointerMove={brushBack}
+      onPointerUp={endBrush}
+      onPointerOut={endBrush}
+      onPointerCancel={endBrush}
     >
       <primitive object={scene} />
     </group>

@@ -3,10 +3,11 @@ import { create } from "zustand";
 export type ToolMode = "pet" | "ball" | "brush";
 export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush";
 export type MealKind = "feed" | "water";
+export type PetPart = "head" | "chin" | "back";
 export type ActivePanel = "profile" | "settings" | null;
 export type StatKey = "hunger" | "water" | "energy" | "clean";
 
-type Interaction = { kind: InteractionKind; sequence: number };
+type Interaction = { kind: InteractionKind; part: PetPart; sequence: number };
 
 type GameUI = {
   tool: ToolMode;
@@ -22,15 +23,16 @@ type GameUI = {
   setPanel: (panel: ActivePanel) => void;
   setStatDetail: (key: StatKey | null) => void;
   setQuality: (quality: "high" | "low") => void;
-  trigger: (kind: InteractionKind) => void;
+  trigger: (kind: InteractionKind, part?: PetPart) => void;
   setBowl: (kind: MealKind, portions: number) => void;
   setNotice: (notice: string) => void;
   clearNotice: () => void;
 };
 
-const messages: Partial<Record<InteractionKind, string>> = {
-  pet: "团子低下头，凑近了你的手。",
-  brush: "团子很享受被轻轻梳毛。",
+const petMessages: Record<PetPart, string> = {
+  head: "团子低下头，凑近了你的手。",
+  chin: "团子抬起下巴，让你再挠一会儿。",
+  back: "团子回头看了看摸它的手。",
 };
 
 export const useGameUI = create<GameUI>((set) => ({
@@ -47,9 +49,9 @@ export const useGameUI = create<GameUI>((set) => ({
   setPanel: (panel) => set({ panel, foodOpen: false, statDetail: null }),
   setStatDetail: (statDetail) => set({ statDetail, foodOpen: false }),
   setQuality: (quality) => set({ quality }),
-  trigger: (kind) => set((state) => ({
-    interaction: { kind, sequence: (state.interaction?.sequence ?? 0) + 1 },
-    notice: messages[kind] ?? state.notice,
+  trigger: (kind, part = "head") => set((state) => ({
+    interaction: { kind, part, sequence: (state.interaction?.sequence ?? 0) + 1 },
+    notice: kind === "pet" ? petMessages[part] : kind === "brush" ? "团子摇摇尾巴，背上的毛梳顺了。" : state.notice,
     foodOpen: false,
   })),
   setBowl: (kind, portions) => set({ bowl: portions ? { kind, portions } : null }),

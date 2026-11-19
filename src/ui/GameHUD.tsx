@@ -44,7 +44,7 @@ function StatRings() {
 const toolHint: Record<ToolMode, string> = {
   pet: "轻触团子，摸摸它",
   ball: "点击团子或地面，把球抛出去",
-  brush: "轻触团子，给它梳梳毛",
+  brush: "按住团子的背，顺着背部拖动",
 };
 
 function InteractionDock() {
