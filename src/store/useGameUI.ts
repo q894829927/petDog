@@ -1,9 +1,9 @@
 import { create } from "zustand";
 
 export type ToolMode = "pet" | "ball" | "brush";
-export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush";
+export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush" | "poke";
 export type MealKind = "feed" | "water";
-export type PetPart = "head" | "ear" | "cheek" | "chin" | "chest" | "back" | "flank" | "leg" | "paw" | "tailRoot" | "tail" | "belly";
+export type PetPart = "head" | "ear" | "cheek" | "chin" | "chest" | "back" | "flank" | "leg" | "paw" | "tailRoot" | "tail" | "belly" | "poke";
 export type PetSide = "L" | "R";
 export type PetTarget = { part: PetPart; side?: PetSide; hind?: boolean };
 export type ActivePanel = "profile" | "settings" | "account" | null;
@@ -44,6 +44,7 @@ export const petMessages: Record<PetPart, string> = {
   tailRoot: "团子摇了两下尾巴。",
   tail: "团子把尾尖轻轻摆开。",
   belly: "团子松开了前爪，舒服地呼了口气。",
+  poke: "团子收了收尾巴，回头瞧了你一眼。",
 };
 
 export const useGameUI = create<GameUI>((set) => ({

@@ -188,7 +188,7 @@ export function PetWorld() {
     const target = handContact.current;
     if (target?.pointer !== event.pointerId) return;
     target.pressed = false;
-    target.visibleUntil = event.pointerType === "mouse" ? Infinity : performance.now() + 320;
+    if (target.gesture !== "poke") target.visibleUntil = event.pointerType === "mouse" ? Infinity : performance.now() + 320;
   };
   const cancelHand = (event: PointerEvent<HTMLDivElement>) => {
     if (handContact.current?.pointer === event.pointerId) handContact.current = null;

@@ -5,9 +5,11 @@ const faceBones = /^(head|mouth|nose|tongue_|eye_)/;
 const legBones = /^(hip|thigh|leg|shin|foot|claws)_/;
 const touchRadius = 10;
 const cameraForward = new Vector3(0, 0, -1);
+type TouchHit = Pick<Intersection, "object" | "face" | "barycoord"> & { nearTouch?: true };
 
 export function hitPetTarget(
-  { object, face, barycoord }: Pick<Intersection, "object" | "face" | "barycoord">,
+  { object, face, barycoord, nearTouch }: TouchHit,
+  intent: "stroke" | "tap" = "stroke",
 ): PetTarget | null {
   if (!(object instanceof SkinnedMesh) || !face || !barycoord) return null;
 
@@ -40,6 +42,9 @@ export function hitPetTarget(
   }
 
   const side = x >= 0 ? "L" : "R";
+  // The center below the tail root is a small spot on the exposed rear surface.
+  if (intent === "tap" && !nearTouch && tail < 0.28 && z < -0.222 &&
+      (x / 0.029) ** 2 + ((y - 0.374) / 0.021) ** 2 <= 1) return { part: "poke", side };
   if (ears >= 0.29) return { part: "ear", side };
   if (head + ears >= 0.5) {
     if (y < 0.455 && z > 0.312) return { part: "chin" };
@@ -67,7 +72,7 @@ export function createNearbyTouchPicker() {
   const chosenWeights = new Vector3();
   let coords = new Float32Array(0);
 
-  return (mesh: SkinnedMesh, camera: Camera, pointer: Vector2, width: number, height: number): Intersection<SkinnedMesh> | null => {
+  return (mesh: SkinnedMesh, camera: Camera, pointer: Vector2, width: number, height: number): (Intersection<SkinnedMesh> & { nearTouch: true }) | null => {
     // Project the current skinned pose once for the whole touch area.
     const { geometry } = mesh;
     const indices = geometry.index!.array;
@@ -123,6 +128,7 @@ export function createNearbyTouchPicker() {
       object: mesh, point, distance: camera.position.distanceTo(point), barycoord: chosenWeights.clone(),
       face: { a, b, c, normal: triangle.getNormal(new Vector3()), materialIndex: 0 },
       faceIndex: bestFace / 3,
+      nearTouch: true,
     };
   };
 }
