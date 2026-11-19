@@ -12,6 +12,7 @@ export function CloudPanel({ close }: { close: () => void }) {
   const { connected, email, registrationOpen, pet, busy, error } = useCloudPet();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [personality, setPersonality] = useState<Personality>("playful");
+  const formKey = email ? email + (pet ? "/profile" : "/adopt") : "credentials";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -39,7 +40,7 @@ export function CloudPanel({ close }: { close: () => void }) {
               <button type="button" className={mode === "register" ? "selected" : ""} aria-pressed={mode === "register"} onClick={() => setMode("register")}>注册</button>
             </div>
           )}
-          <form className="cloud-form" onSubmit={submit}>
+          <form key={formKey} className="cloud-form" onSubmit={submit}>
             {!email ? (
               <>
                 <label>邮箱<input type="email" name="email" autoComplete="username" required maxLength={254} /></label>

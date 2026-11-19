@@ -1,7 +1,7 @@
 # 倩岚汪 — 部署与发布方案
 
 - 文档版本：0.2
-- 当前状态：前端已在 ECS 自动发布；API 已实现并由独立工作流打包，待在 ECS 首次安装
+- ECS 已启用前端自动发布和独立 API 服务，HTTPS 健康检查已通过。
 - 仓库：q894829927/petDog
 - 前端路径：/games/petdog/
 - API 路径：/pet-api/
@@ -104,6 +104,8 @@ Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理�
 4. 在现有 HTTPS server 块引入 `deploy/petdog-api.nginx.conf` 的内容。运行 `nginx -t`，通过后重载 Nginx。
 5. 检查 `/pet-api/healthz` 是否返回 `{"ok":true}`，再用两个独立会话验证登录同一账号后能看到同一份宠物存档。
 
+首次上线的试玩注册由 HTTPS 站点限制来源。登录和已有存档可在不同设备使用。
+
 ## 4. 后端自动发布流程
 
 后端不能直接套用静态站点安装器。需要新增独立的受控发布器：
@@ -184,8 +186,9 @@ Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理�
 - [x] ECS 前端站点首次安装、timer 启用与线上验收。
 - [x] API 构建、测试和 release 工作流。
 - [ ] ECS API 安装器与受控发布器。
-- [ ] petdog-api.service 和 timer。
-- [ ] Nginx /pet-api/ 反向代理。
+- [x] petdog-api.service。
+- [ ] API 自动发布 timer。
+- [x] Nginx /pet-api/ 反向代理。
 - [ ] 数据库初始化、迁移和自动备份。
 - [ ] HTTPS 下 Cookie 登录与跨设备验证。
 - [ ] API 失败回滚与数据库恢复演练。
