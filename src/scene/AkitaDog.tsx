@@ -23,7 +23,7 @@ import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
-import { createReclinedPose } from "./reclinedPose";
+import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import {
   ballClearance,
@@ -57,7 +57,7 @@ const petRegionTravel = 8;
 const brushStrokeLength = 0.3;
 const pokeTapLimit = 450;
 const pokeDragLimit = 7;
-const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap"];
+const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap", "Recline"];
 
 type FetchTrip = {
   plan: FetchPlan;
@@ -145,7 +145,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (!idle) throw new Error("Akita animation missing: Idle");
     const chin = touchClip(idle, "LiftChin", "head", new Vector3(1, 0, 0), (t) => 0.42 * Math.sin(Math.PI * t));
     const brush = touchClip(idle, "Brush", "tail_01", new Vector3(0, 1, 0), (t) => 0.58 * Math.sin(6 * Math.PI * t) * Math.sin(Math.PI * t));
-    return [...assetClips, chin, brush];
+    return [...assetClips, chin, brush, ...reclineClips(assetClips)];
   }, [assetClips]);
   const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
   const reactions = useMemo(() => {
@@ -375,7 +375,8 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const finished = action.time >= action.getClip().duration;
     if ((lying.phase === "turn" && lying.pending) || (lying.phase === "up" && finished)) {
       recline.current = null;
-      poseReclined(body, skin, 0, 0);
+      body.position.set(0, 0, 0);
+      body.rotation.z = 0;
       rest();
       body.updateMatrixWorld(true);
       skin.computeBoundingSphere();
@@ -385,32 +386,33 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
     switch (lying.phase) {
       case "turn":
+        poseReclined(body, skin, 0);
         if (face(group, lying.heading, turnSpeed * step)) {
           lying.phase = "down";
-          play("NapDown");
+          play("ReclineDown");
         }
         break;
       case "down":
-        poseReclined(body, skin, MathUtils.smoothstep(action.time, 0.95, action.getClip().duration), MathUtils.smoothstep(action.time, 0.45, 1.0));
+        poseReclined(body, skin, rollIntoRecline(action.time, action.getClip().duration));
         if (finished) {
           lying.phase = "hold";
-          play("Nap");
+          play("Recline");
           body.updateMatrixWorld(true);
           skin.computeBoundingSphere();
           useGameUI.getState().setNotice("团子侧躺下来，把肚皮露给你。");
         }
         break;
       case "hold":
-        poseReclined(body, skin, 1, 1);
+        poseReclined(body, skin, 1);
         if (!petting) lying.holdFor -= step;
         if (lying.pending || lying.holdFor <= 0) {
           reactions.fade();
           lying.phase = "up";
-          play("NapUp");
+          play("ReclineUp");
         }
         break;
       case "up":
-        poseReclined(body, skin, 1 - MathUtils.smoothstep(action.time, 0, 0.9), 1 - MathUtils.smoothstep(action.time, 1.05, 1.7));
+        poseReclined(body, skin, rollOutOfRecline(action.time));
         break;
     }
   };
@@ -800,7 +802,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
           reactions.fade();
           if (face(group, heading, 0)) {
             recline.current.phase = "down";
-            play("NapDown");
+            play("ReclineDown");
           } else {
             play("Walk");
           }
