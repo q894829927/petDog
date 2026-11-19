@@ -173,10 +173,10 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
           const hit = pose.ray.intersectObject(previous.mesh, false)[0];
           if (hit?.face && hit.barycoord) {
             const part = hitPetPart(hit, previous.head);
-            if (tool === "pet" || previous.pressed || part === "back") {
+            if (part && (tool === "pet" || part === "back")) {
               previous.vertices = [hit.face.a, hit.face.b, hit.face.c];
               previous.weights = hit.barycoord;
-              previous.gesture = tool === "brush" ? "brush" : part ?? "head";
+              previous.gesture = tool === "brush" ? "brush" : part;
               sampleSurface(previous, pose.triangle, pose.hitPoint, pose.hitNormal);
               target = previous;
             }

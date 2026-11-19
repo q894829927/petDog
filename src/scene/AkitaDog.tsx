@@ -506,14 +506,14 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   const pointerDown = (event: ThreeEvent<PointerEvent>) => {
     if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
     const part = hitPetPart(event, head);
-    if (tool === "brush" && part !== "back") return;
+    if (!part || (tool === "brush" && part !== "back")) return;
     event.stopPropagation();
-    placeHand(event, tool === "brush" ? "brush" : part ?? "head", true);
+    placeHand(event, tool === "brush" ? "brush" : part, true);
     if (tool === "pet") {
       const now = performance.now();
       if (now - lastPetAt.current < 400) return;
       lastPetAt.current = now;
-      trigger("pet", part ?? "head");
+      trigger("pet", part);
       return;
     }
     if (!dog.current) return;
@@ -527,10 +527,9 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const onBack = tool === "brush" && part === "back";
     const pressed = (event.buttons & 1) !== 0;
     const target = handContact.current;
-    const holdingHand = pressed && target?.pointer === event.pointerId;
-    if ((tool === "pet" || onBack || holdingHand) && (event.pointerType === "mouse" || pressed)) {
-      placeHand(event, tool === "brush" ? "brush" : part ?? "head", pressed);
-    } else if (tool === "brush" && !onBack && target?.pointer === event.pointerId) {
+    if (part && (tool === "pet" || onBack) && (event.pointerType === "mouse" || pressed)) {
+      placeHand(event, tool === "brush" ? "brush" : part, pressed);
+    } else if ((!part || (tool === "brush" && !onBack)) && target?.pointer === event.pointerId) {
       handContact.current = null;
     }
     const stroke = brushing.current;
