@@ -486,9 +486,8 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     const { object, face, barycoord } = event;
     if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return;
     const previous = handContact.current;
-    const sameGesture = previous?.pointer === event.pointerId && previous.gesture === gesture;
-    let startedAt = sameGesture ? previous.startedAt : null;
-    if (pressed && (!sameGesture || !previous.pressed)) startedAt = performance.now();
+    const samePointer = previous?.pointer === event.pointerId;
+    const startedAt = event.type === "pointerdown" ? performance.now() : samePointer ? previous.startedAt : null;
     handContact.current = {
       dog: dog.current,
       mesh: object,
