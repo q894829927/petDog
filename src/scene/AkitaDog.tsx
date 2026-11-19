@@ -21,6 +21,7 @@ import {
   chooseWalkTarget,
   clearsBall,
   hasRoomToRun,
+  planCall,
   planFetch,
   planMeal,
   rugSurface,
@@ -29,9 +30,8 @@ import {
   type WalkPlan,
 } from "./roomNavigation";
 
-const interactionClips: Record<Exclude<InteractionKind, "ball" | MealKind>, string> = {
+const interactionClips: Record<Exclude<InteractionKind, "ball" | "call" | MealKind>, string> = {
   pet: "Pet",
-  call: "LookAround",
   brush: "Pet",
 };
 
@@ -55,7 +55,7 @@ type FetchTrip = {
   waypoint: number;
 };
 
-type Meal = WalkPlan & { kind: MealKind; waypoint: number };
+type Approach = WalkPlan & { kind: MealKind | "call"; waypoint: number };
 
 function face(group: Group, heading: number, turnStep: number) {
   const turn = MathUtils.euclideanModulo(heading - group.rotation.y + Math.PI, 2 * Math.PI) - Math.PI;
@@ -88,7 +88,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   const dog = useRef<Group>(null);
   const roaming = useRef<{ target: FloorPoint | null; restTime: number }>({ target: null, restTime: 1.7 });
   const fetch = useRef<FetchTrip | null>(null);
-  const meal = useRef<Meal | null>(null);
+  const approach = useRef<Approach | null>(null);
   const currentAction = useRef<AnimationAction | null>(null);
   const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
   const interaction = useGameUI((state) => state.interaction);
@@ -131,9 +131,9 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
 
     const onFinished = ({ action }: { action: AnimationAction }) => {
       if (action !== currentAction.current || action.getClip().name === "ReachBall") return;
-      const dining = meal.current;
-      if (dining && action.getClip().name === mealClips[dining.kind]) {
-        meal.current = null;
+      const dining = approach.current;
+      if (dining && dining.kind !== "call" && action.getClip().name === mealClips[dining.kind]) {
+        approach.current = null;
         const ui = useGameUI.getState();
         ui.setBowl(dining.kind, 0);
         ui.setNotice(dining.kind === "feed" ? "团子吃完了狗粮。" : "团子喝完了水。");
@@ -178,7 +178,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
         flightTime: 0,
         waypoint: 0,
       };
-      meal.current = null;
+      approach.current = null;
       roaming.current.target = null;
       play("Idle");
       useGameUI.getState().setNotice("球抛出去了！");
@@ -187,20 +187,27 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
 
     const kind = interaction.kind;
     const trip = fetch.current;
-    if (kind === "feed" || kind === "water") {
-      if (!group || meal.current?.kind === kind) return;
+    if (kind === "feed" || kind === "water" || kind === "call") {
+      if (!group || approach.current?.kind === kind) return;
       const floorBall = trip?.phase === "flight" ? trip.plan.pickup.ball : toy?.position ?? ballStart;
-      const plan = planMeal(group.position, floorBall);
       const ui = useGameUI.getState();
-      if (!plan) {
-        ui.setNotice("团子还没找到走到碗边的路。");
-        return;
+      if (kind === "call") {
+        const plan = planCall(group.position, floorBall) ??
+          { route: [], heading: headingTo(group.position, { x: 0, z: 7.2 }) };
+        approach.current = { ...plan, waypoint: 0, kind };
+        ui.setNotice("团子听到了你的呼唤！");
+      } else {
+        const plan = planMeal(group.position, floorBall);
+        if (!plan) {
+          ui.setNotice("团子还没找到走到碗边的路。");
+          return;
+        }
+        approach.current = { ...plan, waypoint: 0, kind };
+        ui.setBowl(kind, 3);
+        ui.setNotice(kind === "feed" ? "狗粮放好了，团子正往碗边走。" : "清水倒好了，团子正往碗边走。");
       }
-      meal.current = { ...plan, waypoint: 0, kind };
-      ui.setBowl(kind, 3);
-      ui.setNotice(kind === "feed" ? "狗粮放好了，团子正往碗边走。" : "清水倒好了，团子正往碗边走。");
     } else {
-      meal.current = null;
+      approach.current = null;
     }
 
     if (trip?.phase === "flight") {
@@ -210,7 +217,8 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       fetch.current = null;
     }
     roaming.current.target = null;
-    if (kind === "feed" || kind === "water") play("Idle");
+    if (kind === "call") play("LookAround");
+    else if (kind === "feed" || kind === "water") play("Idle");
     else play(interactionClips[kind]);
   }, [ball, interaction, play]);
 
@@ -295,27 +303,40 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       return;
     }
 
-    const dining = meal.current;
-    if (dining) {
-      const target = dining.route[dining.waypoint];
-      const heading = target ? headingTo(group.position, target) : dining.heading;
+    const visit = approach.current;
+    if (visit) {
+      const { kind } = visit;
+      const target = visit.route[visit.waypoint];
+      const heading = target ? headingTo(group.position, target) : visit.heading;
+      if (kind === "call" && action.getClip().name === "LookAround" && action.time < 0.55) {
+        face(group, headingTo(group.position, { x: 0, z: camera.position.z }), turnSpeed * step);
+        return;
+      }
       if (target) {
         const movement = play("Walk");
         if (face(group, heading, turnSpeed * step) &&
             moveToward(group.position, target, walkSpeed * step * movement.getEffectiveWeight())) {
-          dining.waypoint++;
+          visit.waypoint++;
         }
-      } else if (action.getClip().name !== mealClips[dining.kind]) {
+      } else if (kind === "call") {
         play("Idle");
         if (face(group, heading, turnSpeed * step)) {
-          play(mealClips[dining.kind]);
-          useGameUI.getState().setNotice(dining.kind === "feed" ? "团子低下头，小口吃了起来。" : "团子正在碗边喝水。");
+          approach.current = null;
+          rest();
+          roaming.current.restTime = 7;
+          useGameUI.getState().setNotice(visit.route.length ? "团子来到你面前，等你摸摸它。" : "团子停下来望着你。");
+        }
+      } else if (action.getClip().name !== mealClips[kind]) {
+        play("Idle");
+        if (face(group, heading, turnSpeed * step)) {
+          play(mealClips[kind]);
+          useGameUI.getState().setNotice(kind === "feed" ? "团子低下头，小口吃了起来。" : "团子正在碗边喝水。");
         }
       } else {
         const consumed = MathUtils.clamp((action.time - 0.85) / (action.getClip().duration - 1.6), 0, 1);
         const portions = Math.ceil(3 * (1 - consumed));
         const ui = useGameUI.getState();
-        if (portions !== (ui.bowl?.portions ?? 0)) ui.setBowl(dining.kind, portions);
+        if (portions !== (ui.bowl?.portions ?? 0)) ui.setBowl(kind, portions);
       }
       return;
     }

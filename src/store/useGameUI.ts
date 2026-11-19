@@ -30,7 +30,6 @@ type GameUI = {
 
 const messages: Partial<Record<InteractionKind, string>> = {
   pet: "团子低下头，凑近了你的手。",
-  call: "团子听到了你的呼唤！",
   brush: "团子很享受被轻轻梳毛。",
 };
 

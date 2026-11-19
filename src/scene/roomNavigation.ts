@@ -72,6 +72,15 @@ export function planMeal(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
   return null;
 }
 
+export function planCall(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
+  for (const z of [1.12, 0.74, 0.42]) {
+    const stop = { x: 0, z };
+    const route = routeTo(start, stop, dogClearance, ball);
+    if (route) return { route, heading: 0 };
+  }
+  return null;
+}
+
 export function hasRoomToRun(position: FloorPoint, ball: FloorPoint) {
   return Math.hypot(position.x - rug.x, position.z - rug.z) <= rug.radius - runClearance &&
     clearsRoomProps(position, position, runClearance) &&
