@@ -1,4 +1,5 @@
 import { Box3, Matrix4, Mesh, Vector3, type Group, type SkinnedMesh } from "three";
+import { rugSurface } from "./roomNavigation";
 
 const gridSize = 64;
 const clearance = 0.006;
@@ -86,14 +87,19 @@ export function createHandClearance(hand: Group, comb: Group) {
   const vertex = new Vector3();
   const right = new Vector3();
   const up = new Vector3();
+  const heightAxis = new Vector3();
   const plane = new Matrix4();
   const transform = new Matrix4();
+  let handBottom = Infinity;
 
   function project({ mesh, vertices }: Surface, footprint?: Box3) {
     transform.multiplyMatrices(plane, mesh.matrixWorld);
     for (let i = 0; i < vertices.length; i += 3) {
       mesh.getVertexPosition(i / 3, vertex).applyMatrix4(transform).toArray(vertices, i);
-      footprint?.expandByPoint(vertex);
+      if (footprint) {
+        footprint.expandByPoint(vertex);
+        handBottom = Math.min(handBottom, vertex.dot(heightAxis));
+      }
     }
   }
 
@@ -102,6 +108,8 @@ export function createHandClearance(hand: Group, comb: Group) {
     right.copy(wristRight).addScaledVector(outward, -wristRight.dot(outward)).normalize();
     up.crossVectors(outward, right);
     plane.makeBasis(right, up, outward).transpose();
+    heightAxis.set(right.y, up.y, outward.y);
+    handBottom = Infinity;
     bounds.makeEmpty();
     const activeSurfaces = comb.visible ? handSurfaces : bareHandSurfaces;
     for (const skin of activeSurfaces) project(skin, bounds);
@@ -112,7 +120,7 @@ export function createHandClearance(hand: Group, comb: Group) {
     for (const skin of activeSurfaces) fillDepth(handDepth, skin, bounds, -1);
     fillDepth(dogDepth, dogSurface, bounds, 1);
 
-    let shift = 0;
+    let shift = outward.y > 0 ? Math.max(0, (rugSurface + clearance - handBottom) / outward.y) : 0;
     for (let cell = 0; cell < dogDepth.length; cell++) {
       shift = Math.max(shift, dogDepth[cell] + handDepth[cell] + clearance);
     }

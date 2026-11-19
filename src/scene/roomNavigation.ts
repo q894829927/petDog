@@ -97,6 +97,15 @@ export function hasRoomToRun(position: FloorPoint, ball: FloorPoint) {
     Math.hypot(position.x - ball.x, position.z - ball.z) >= runClearance + ballStart.radius;
 }
 
+export function canReclineAt(position: FloorPoint, heading: number, ball: FloorPoint) {
+  const x = Math.sin(heading), z = Math.cos(heading);
+  const tail = { x: position.x - x * 0.84, z: position.z - z * 0.84 };
+  const paws = { x: position.x + x * 0.92, z: position.z + z * 0.92 };
+  const spread = 0.43;
+  return clearsRoomProps(tail, paws, spread) && clearsRoomProps(paws, tail, spread) &&
+    clearsObstacle(tail, paws, ball, ballStart.radius, spread) && clearsObstacle(paws, tail, ball, ballStart.radius, spread);
+}
+
 function fetchStop(ball: FloorPoint, heading: number) {
   // The ball's center is 0.945 units forward at contact in ReachBall.
   const reach = 0.945;

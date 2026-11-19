@@ -39,7 +39,7 @@ type HandPose = "head" | "chin" | "back" | "side" | "fingertips" | "brush";
 const handPose: Record<HandGesture, HandPose> = {
   head: "head", ear: "fingertips", cheek: "fingertips", chin: "chin",
   chest: "side", back: "back", flank: "side", leg: "side", paw: "fingertips",
-  tailRoot: "fingertips", tail: "fingertips", brush: "brush",
+  tailRoot: "fingertips", tail: "fingertips", belly: "side", brush: "brush",
 };
 const thumbCurls: Record<HandPose, number> = { head: 0.105, chin: 0.22, back: 0.105, side: 0.12, fingertips: 0.22, brush: 0.3 };
 const palmContact: Record<HandPose, number> = { head: 0.3, chin: 0, back: 0.82, side: 0.76, fingertips: 0, brush: 0 };
@@ -268,6 +268,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     const chin = gesture === "chin";
     const fingertips = gesture === "fingertips";
     const pettingSide = gesture === "side";
+    const rubbingBelly = pose.gesture === "belly";
     const brushing = gesture === "brush";
     const alongBack = gesture === "back" || brushing;
     pose.combMix = MathUtils.lerp(pose.combMix, Number(brushing), appearing ? 1 : blend);
@@ -297,6 +298,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.43);
     } else if (pettingBack) {
       pose.y.copy(pose.view).negate().addScaledVector(pose.forward, 0.60);
+    } else if (rubbingBelly) {
+      pose.y.copy(pose.forward).addScaledVector(worldUp, 0.18);
     } else if (pettingSide || fingertips) {
       // A high wrist keeps the fingers clear of the muzzle and the low part of the room.
       pose.y.copy(worldUp).negate().addScaledVector(pose.forward, -0.48).addScaledVector(pose.view, -0.27);
@@ -349,7 +352,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.z.set(0, 0, 1).applyQuaternion(group.quaternion);
     const aligned = MathUtils.smoothstep(pose.normal.dot(pose.z), 0.45, 0.84);
     // Lead with the finger pads along the cheeks and let the palm settle on flatter fur.
-    const palmWeight = gesture === "head" ? palmContact.head * MathUtils.lerp(0.25, 1, crown) : palmContact[gesture];
+    const palmWeight = rubbingBelly ? 0.72 : gesture === "head" ? palmContact.head * MathUtils.lerp(0.25, 1, crown)
+      : pettingSide ? palmContact.side * MathUtils.smoothstep(pose.point.y, 0.10, 0.37) : palmContact[gesture];
     pose.palmMix = MathUtils.lerp(pose.palmMix, palmWeight * pose.pressure * aligned, blend);
     pose.palmPad.copy(palmPad).applyMatrix4(group.matrixWorld);
     pose.fingertip.lerp(pose.palmPad, pose.palmMix);
@@ -359,10 +363,13 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     }
 
     pose.nextOutward.copy(pose.normal).multiplyScalar(0.8).addScaledVector(pose.z, 0.85).addScaledVector(pose.view, 0.18);
-    if (pose.point.y < 0.46 && pose.nextOutward.y < 0) {
-      pose.nextOutward.y = 0;
-    }
+    const nearRug = pose.point.y < 0.52;
+    if (nearRug) pose.nextOutward.y = Math.max(0.42, pose.nextOutward.y);
     pose.outward.lerp(pose.nextOutward.normalize(), appearing ? 1 : blend).normalize();
+    if (nearRug && pose.outward.y < 0.25) {
+      pose.outward.y = 0.25;
+      pose.outward.normalize();
+    }
     pose.goal.copy(pose.point);
     if (gesture === "head" || gesture === "back" || pettingSide || fingertips) {
       pose.strokeDirection.copy(pose.forward).addScaledVector(pose.normal, -pose.forward.dot(pose.normal));

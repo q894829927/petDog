@@ -23,11 +23,13 @@ import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
+import { createReclinedPose } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import {
   ballClearance,
   ballGroundY,
   ballStart,
+  canReclineAt,
   chooseWalkTarget,
   clearsBall,
   hasRoomToRun,
@@ -72,7 +74,21 @@ type PetStroke = {
   pointer: number;
   target: PetTarget;
   next: { target: PetTarget; screenPoint: Vector2; since: number } | null;
+  rub: { seconds: number; distance: number; previousPoint: Vector2 | null };
 };
+
+type PendingInteraction = { interaction: Interaction; owner: number | null };
+
+type Recline = {
+  phase: "turn" | "down" | "hold" | "up";
+  heading: number;
+  holdFor: number;
+  pending: PendingInteraction | null;
+};
+
+function isRubArea(gesture: HandGesture | undefined) {
+  return gesture === "chest" || gesture === "flank";
+}
 
 function samePetTarget(a: PetTarget, b: PetTarget | undefined) {
   return a.part === b?.part && a.side === b.side && a.hind === b.hind;
@@ -140,13 +156,21 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     if (!bone) throw new Error("Akita head bone missing");
     return bone;
   }, [scene]);
+  const skin = useMemo(() => {
+    const mesh = scene.getObjectByProperty("isSkinnedMesh", true);
+    if (!(mesh instanceof SkinnedMesh)) throw new Error("Akita skinned mesh missing");
+    return mesh;
+  }, [scene]);
   const dog = useRef<Group>(null);
+  const rig = useRef<Group>(null);
+  const recline = useRef<Recline | null>(null);
+  const poseReclined = useMemo(createReclinedPose, []);
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
   const fetch = useRef<FetchTrip | null>(null);
   const approach = useRef<Approach | null>(null);
   const nap = useRef<{
     timeLeft: number;
-    pending: { interaction: Interaction; owner: number | null } | null;
+    pending: PendingInteraction | null;
     owner: number | null;
   } | null>(null);
   const currentAction = useRef<AnimationAction | null>(null);
@@ -186,6 +210,10 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   }, [play]);
 
   const reactToPet = useCallback((target: PetTarget) => {
+    if (recline.current) {
+      reactions.play(target);
+      return;
+    }
     const base = currentAction.current?.getClip().name;
     const authored = target.part === "head" ? "Pet" : target.part === "chin" ? "LiftChin" : null;
     if (authored && base !== "Sit") {
@@ -206,7 +234,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     play(playback.current.name, playback.current.time);
 
     const onFinished = ({ action }: { action: AnimationAction }) => {
-      if (action !== currentAction.current || action.getClip().name === "ReachBall" || nap.current) return;
+      if (action !== currentAction.current || action.getClip().name === "ReachBall" || nap.current || recline.current) return;
       const dining = approach.current;
       if (dining && (dining.kind === "feed" || dining.kind === "water") &&
           action.getClip().name === mealClips[dining.kind]) {
@@ -314,6 +342,16 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     playback.current.interactionSequence = interaction.sequence;
     if (interaction.kind !== "pet") petStroke.current = null;
     const owner = useCloudPet.getState().accountId;
+    const lying = recline.current;
+    if (lying) {
+      if (interaction.kind === "pet" && lying.phase !== "up") {
+        reactToPet(interaction);
+        recordPetAction("pet", owner);
+      } else {
+        lying.pending = { interaction, owner };
+      }
+      return;
+    }
     const sleeping = nap.current;
     if (sleeping) {
       sleeping.pending = { interaction, owner };
@@ -322,7 +360,51 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     } else {
       startInteraction(interaction, owner);
     }
-  }, [interaction, play, startInteraction]);
+  }, [interaction, play, reactToPet, startInteraction]);
+
+  const advanceRecline = (lying: Recline, group: Group, body: Group, action: AnimationAction, step: number, petting: boolean) => {
+    const finished = action.time >= action.getClip().duration;
+    if ((lying.phase === "turn" && lying.pending) || (lying.phase === "up" && finished)) {
+      recline.current = null;
+      poseReclined(body, skin, 0, 0);
+      rest();
+      body.updateMatrixWorld(true);
+      skin.computeBoundingSphere();
+      if (lying.pending) startInteraction(lying.pending.interaction, lying.pending.owner);
+      return;
+    }
+
+    switch (lying.phase) {
+      case "turn":
+        if (face(group, lying.heading, turnSpeed * step)) {
+          lying.phase = "down";
+          play("NapDown");
+        }
+        break;
+      case "down":
+        poseReclined(body, skin, MathUtils.smoothstep(action.time, 0.95, action.getClip().duration), MathUtils.smoothstep(action.time, 0.45, 1.0));
+        if (finished) {
+          lying.phase = "hold";
+          play("Nap");
+          body.updateMatrixWorld(true);
+          skin.computeBoundingSphere();
+          useGameUI.getState().setNotice("团子侧躺下来，把肚皮露给你。");
+        }
+        break;
+      case "hold":
+        poseReclined(body, skin, 1, 1);
+        if (!petting) lying.holdFor -= step;
+        if (lying.pending || lying.holdFor <= 0) {
+          reactions.fade();
+          lying.phase = "up";
+          play("NapUp");
+        }
+        break;
+      case "up":
+        poseReclined(body, skin, 1 - MathUtils.smoothstep(action.time, 0, 0.9), 1 - MathUtils.smoothstep(action.time, 1.05, 1.7));
+        break;
+    }
+  };
 
   const holdBall = (toy: Mesh) => {
     // Head-bone units for the center of a ball held by the front of the jaw.
@@ -476,7 +558,21 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
     const touch = handContact.current;
     const stroke = petStroke.current;
-    const petting = tool === "pet" && touch?.pressed && stroke?.pointer === touch.pointer;
+    const petting = tool === "pet" && touch?.pressed === true && stroke?.pointer === touch.pointer;
+    if (stroke) {
+      const { rub } = stroke;
+      if (petting && !recline.current && isRubArea(touch.gesture)) {
+        rub.seconds += step;
+        if (rub.previousPoint) {
+          const x = (touch.screenPoint.x - rub.previousPoint.x) * size.width / 2;
+          const y = (touch.screenPoint.y - rub.previousPoint.y) * size.height / 2;
+          rub.distance += Math.min(20, Math.hypot(x, y));
+        }
+        rub.previousPoint = touch.screenPoint;
+      } else {
+        rub.previousPoint = null;
+      }
+    }
     const next = stroke?.next;
     if (petting && next && next.target.part === touch.gesture) {
       const now = performance.now();
@@ -490,8 +586,12 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
         // One press records one interaction. Further strokes only change the visible reaction.
         reactToPet(next.target);
         useGameUI.getState().setNotice(petMessages[next.target.part]);
-        return;
       }
+    }
+
+    if (recline.current && rig.current) {
+      advanceRecline(recline.current, group, rig.current, action, step, petting);
+      return;
     }
 
     const grooming = tool === "brush" && touch?.pressed && touch.gesture === "brush";
@@ -578,7 +678,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       const now = performance.now();
       if (now - lastPetAt.current < petReactionCooldown) return;
       lastPetAt.current = now;
-      petStroke.current = { pointer: event.pointerId, target, next: null };
+      petStroke.current = { pointer: event.pointerId, target, next: null, rub: { seconds: 0, distance: 0, previousPoint: null } };
       trigger("pet", target);
       return;
     }
@@ -621,13 +721,32 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   };
 
   const finishPointer = (event: ThreeEvent<PointerEvent>) => {
+    const target = handContact.current;
     const petting = petStroke.current;
     if (petting?.pointer === event.pointerId) {
       if (event.type === "pointerout") petting.next = null;
       else petStroke.current = null;
+      const group = dog.current;
+      const base = currentAction.current?.getClip().name;
+      if (event.type === "pointerup" && tool === "pet" && !recline.current && !nap.current && !approach.current && !fetch.current &&
+          group && (base === "Idle" || base === "Sit") && isRubArea(target?.gesture) &&
+          petting.rub.seconds >= 1.15 && petting.rub.distance >= (target?.touch ? 14 : 22)) {
+        const facingCamera = headingTo(group.position, event.camera.position);
+        const headings = [facingCamera + Math.PI / 2, facingCamera + 1.22, facingCamera + 1.91];
+        const heading = headings.find((angle) => canReclineAt(group.position, angle, ball.current?.position ?? ballStart));
+        if (heading !== undefined) {
+          recline.current = { phase: "turn", heading, holdFor: 6, pending: null };
+          reactions.fade();
+          if (face(group, heading, 0)) {
+            recline.current.phase = "down";
+            play("NapDown");
+          } else {
+            play("Walk");
+          }
+        }
+      }
     }
     if (brushing.current?.pointer === event.pointerId) brushing.current = null;
-    const target = handContact.current;
     if (target?.pointer === event.pointerId && event.type !== "pointerup" && target.visibleUntil === Infinity) {
       handContact.current = null;
     }
@@ -647,7 +766,9 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       onPointerOut={finishPointer}
       onPointerCancel={finishPointer}
     >
-      <primitive object={scene} />
+      <group name="Akita pose" ref={rig}>
+        <primitive object={scene} />
+      </group>
     </group>
   );
 }

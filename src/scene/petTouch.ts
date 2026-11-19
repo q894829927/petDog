@@ -50,7 +50,7 @@ export function hitPetTarget(
   if (legs >= 0.47 && y < 0.315) {
     return { part: paws > 0.44 || y < 0.065 ? "paw" : "leg", side, hind: z < 0 };
   }
-  if (y < 0.315 && z < 0.12) return null;
+  if (y < 0.31 && z > -0.2 && z < 0.138 && Math.abs(x) < 0.083) return { part: "belly", side };
   if (neck >= 0.45 || (z > 0.148 && y < 0.45)) return { part: "chest", side };
   if (y > 0.425 && trunk + neck > 0.39) return { part: "back", side };
   return { part: "flank", side };

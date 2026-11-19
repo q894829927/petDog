@@ -73,6 +73,8 @@ function makeClip({ part, side = "L", hind }: PetTarget, lookAround: AnimationCl
       return reactionClip(part, 1.14, [["tail_01", yaw, 0.50, 2.5], ["tail_03", yaw, 0.14, 2.5]]);
     case "tail":
       return reactionClip(part, 0.82, [["tail_03", roll, -0.32 * direction], ["tail_05", roll, -0.32 * direction]]);
+    case "belly":
+      return reactionClip(part, 1.38, [["foot_f_L", pitch, 0.20], ["foot_f_R", pitch, 0.16], ["Spine_05", pitch, 0.045]]);
     case "head":
       return reactionClip(part, 1.25, [["head", pitch, -0.19], ["neck", pitch, -0.09]]);
     case "chin":
