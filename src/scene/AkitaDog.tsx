@@ -17,7 +17,7 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
-import { useGameUI, type MealKind, type PetPart } from "../store/useGameUI";
+import { useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
 import { hitPetPart } from "./petTouch";
 import {
   ballClearance,
@@ -29,6 +29,7 @@ import {
   planCall,
   planFetch,
   planMeal,
+  planNap,
   rugSurface,
   type FetchPlan,
   type FloorPoint,
@@ -44,7 +45,7 @@ const walkSpeed = 0.519 * dogScale;
 const runPlaybackRate = 0.7;
 const runSpeed = 1.1615 * 1.5 * dogScale * runPlaybackRate;
 const biteTime = 0.5;
-const loopingClips = ["Idle", "Walk", "Run", "Carry"];
+const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap"];
 
 type FetchTrip = {
   plan: FetchPlan;
@@ -56,7 +57,7 @@ type FetchTrip = {
   waypoint: number;
 };
 
-type Approach = WalkPlan & { kind: MealKind | "call"; waypoint: number };
+type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number };
 
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
   const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
@@ -116,9 +117,10 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     return bone;
   }, [scene]);
   const dog = useRef<Group>(null);
-  const roaming = useRef<{ target: FloorPoint | null; restTime: number }>({ target: null, restTime: 1.7 });
+  const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
   const fetch = useRef<FetchTrip | null>(null);
   const approach = useRef<Approach | null>(null);
+  const nap = useRef<{ timeLeft: number; pending: Interaction | null } | null>(null);
   const currentAction = useRef<AnimationAction | null>(null);
   const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
   const interaction = useGameUI((state) => state.interaction);
@@ -161,9 +163,10 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     play(playback.current.name, playback.current.time);
 
     const onFinished = ({ action }: { action: AnimationAction }) => {
-      if (action !== currentAction.current || action.getClip().name === "ReachBall") return;
+      if (action !== currentAction.current || action.getClip().name === "ReachBall" || nap.current) return;
       const dining = approach.current;
-      if (dining && dining.kind !== "call" && action.getClip().name === mealClips[dining.kind]) {
+      if (dining && (dining.kind === "feed" || dining.kind === "water") &&
+          action.getClip().name === mealClips[dining.kind]) {
         approach.current = null;
         const ui = useGameUI.getState();
         ui.setBowl(dining.kind, 0);
@@ -184,9 +187,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     };
   }, [mixer, play, rest, scene]);
 
-  useEffect(() => {
-    if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
-    playback.current.interactionSequence = interaction.sequence;
+  const startInteraction = useCallback((interaction: Interaction) => {
     const toy = ball.current;
     const group = dog.current;
     if (interaction.kind === "ball") {
@@ -251,7 +252,20 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     if (kind === "call") play("LookAround");
     else if (kind === "feed" || kind === "water") play("Idle");
     else play(kind === "brush" ? "Brush" : petClips[interaction.part]);
-  }, [ball, interaction, play]);
+  }, [ball, play]);
+
+  useEffect(() => {
+    if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
+    playback.current.interactionSequence = interaction.sequence;
+    const sleeping = nap.current;
+    if (sleeping) {
+      sleeping.pending = interaction;
+      if (currentAction.current?.getClip().name === "Nap") play("NapUp");
+      useGameUI.getState().setNotice("团子醒了，正在起身。");
+    } else {
+      startInteraction(interaction);
+    }
+  }, [interaction, play, startInteraction]);
 
   const holdBall = (toy: Mesh) => {
     // Head-bone units for the center of a ball held by the front of the jaw.
@@ -328,6 +342,24 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     if (!group || !action) return;
 
     const toy = ball.current;
+    const clip = action.getClip().name;
+    const sleeping = nap.current;
+    if (sleeping) {
+      const finished = action.time >= action.getClip().duration;
+      if (clip === "NapDown" && finished) {
+        play(sleeping.pending ? "NapUp" : "Nap");
+        if (!sleeping.pending) useGameUI.getState().setNotice("团子在狗窝旁打起了盹。");
+      } else if (clip === "Nap") {
+        sleeping.timeLeft -= step;
+        if (sleeping.timeLeft <= 0) play("NapUp");
+      } else if (clip === "NapUp" && finished) {
+        nap.current = null;
+        rest();
+        if (sleeping.pending) startInteraction(sleeping.pending);
+      }
+      return;
+    }
+
     const trip = fetch.current;
     if (trip && toy) {
       advanceFetch(trip, group, toy, action, step);
@@ -357,6 +389,13 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
           roaming.current.restTime = 7;
           useGameUI.getState().setNotice(visit.route.length ? "团子来到你面前，等你摸摸它。" : "团子停下来望着你。");
         }
+      } else if (kind === "nap") {
+        play("Idle");
+        if (face(group, heading, turnSpeed * step)) {
+          approach.current = null;
+          nap.current = { timeLeft: MathUtils.randFloat(7, 11), pending: null };
+          play("NapDown");
+        }
       } else if (action.getClip().name !== mealClips[kind]) {
         play("Idle");
         if (face(group, heading, turnSpeed * step)) {
@@ -374,10 +413,20 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
 
     const activity = roaming.current;
     const ballPosition = toy?.position ?? ballStart;
-    const clip = action.getClip().name;
+    if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
     if (clip === "Idle") {
       activity.restTime -= step;
       if (activity.restTime > 0) return;
+      if (activity.activeTime >= activity.napAfter) {
+        activity.activeTime = 0;
+        activity.napAfter = MathUtils.randFloat(24, 38);
+        const plan = planNap(group.position, ballPosition);
+        if (plan) {
+          approach.current = { ...plan, kind: "nap", waypoint: 0 };
+          useGameUI.getState().setNotice("团子准备去狗窝旁休息。");
+          return;
+        }
+      }
       const halfFov = MathUtils.degToRad((camera as PerspectiveCamera).fov / 2);
       const viewWidthPerDepth = Math.tan(halfFov) * size.width / size.height;
       activity.target = chooseWalkTarget(group.position, ballPosition, camera.position.z, viewWidthPerDepth);

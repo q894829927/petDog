@@ -7,7 +7,7 @@ export type PetPart = "head" | "chin" | "back";
 export type ActivePanel = "profile" | "settings" | null;
 export type StatKey = "hunger" | "water" | "energy" | "clean";
 
-type Interaction = { kind: InteractionKind; part: PetPart; sequence: number };
+export type Interaction = { kind: InteractionKind; part: PetPart; sequence: number };
 
 type GameUI = {
   tool: ToolMode;

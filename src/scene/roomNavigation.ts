@@ -81,6 +81,16 @@ export function planCall(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
   return null;
 }
 
+export function planNap(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
+  for (const stop of [{ x: 0.35, z: -0.17 }, { x: 0, z: -0.58 }]) {
+    // The lying pose extends farther than a normal step.
+    if (Math.hypot(stop.x - ball.x, stop.z - ball.z) < 1.49) continue;
+    const route = routeTo(start, stop, dogClearance, ball);
+    if (route) return { route, heading: -Math.PI / 3 };
+  }
+  return null;
+}
+
 export function hasRoomToRun(position: FloorPoint, ball: FloorPoint) {
   return Math.hypot(position.x - rug.x, position.z - rug.z) <= rug.radius - runClearance &&
     clearsRoomProps(position, position, runClearance) &&
