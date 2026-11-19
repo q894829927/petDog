@@ -21,15 +21,15 @@ type GameUI = {
   setStatDetail: (key: StatKey | null) => void;
   setQuality: (quality: "high" | "low") => void;
   trigger: (kind: InteractionKind) => void;
+  setNotice: (notice: string) => void;
   clearNotice: () => void;
 };
 
-const messages: Record<InteractionKind, string> = {
+const messages: Record<Exclude<InteractionKind, "ball">, string> = {
   pet: "团子低下头，凑近了你的手。",
   call: "团子听到了你的呼唤！",
   feed: "团子低下头，小口吃了起来。",
   water: "团子低下头，舔了几口水。",
-  ball: "球滚了出去，团子兴奋地跳了一下！",
   brush: "团子很享受被轻轻梳毛。",
 };
 
@@ -48,8 +48,9 @@ export const useGameUI = create<GameUI>((set) => ({
   setQuality: (quality) => set({ quality }),
   trigger: (kind) => set((state) => ({
     interaction: { kind, sequence: (state.interaction?.sequence ?? 0) + 1 },
-    notice: messages[kind],
+    notice: kind === "ball" ? state.notice : messages[kind],
     foodOpen: false,
   })),
+  setNotice: (notice) => set({ notice }),
   clearNotice: () => set({ notice: null }),
 }));

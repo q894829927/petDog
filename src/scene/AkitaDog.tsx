@@ -1,0 +1,298 @@
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, type RefObject } from "react";
+import { useFrame, useLoader, type ThreeEvent } from "@react-three/fiber";
+import {
+  AnimationClip,
+  AnimationMixer,
+  LoopOnce,
+  MathUtils,
+  Mesh,
+  type AnimationAction,
+  type Group,
+  type PerspectiveCamera,
+} from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import akitaHighUrl from "../assets/akita-high.glb?url";
+import akitaLowUrl from "../assets/akita.glb?url";
+import { useGameUI, type InteractionKind } from "../store/useGameUI";
+import {
+  ballGroundY,
+  ballStart,
+  chooseWalkTarget,
+  clearsBall,
+  hasRoomToRun,
+  planFetch,
+  rugSurface,
+  type FetchPlan,
+  type FloorPoint,
+} from "./roomNavigation";
+
+const interactionClips: Record<Exclude<InteractionKind, "ball">, string> = {
+  pet: "Pet",
+  call: "LookAround",
+  feed: "Eat",
+  water: "Drink",
+  brush: "Pet",
+};
+
+const dogScale = 2.65;
+const turnSpeed = 3.7;
+// Root-motion distances measured from Walk_F_RM and Run_F_RM.
+const walkSpeed = 0.519 * dogScale;
+const runPlaybackRate = 0.7;
+const runSpeed = 1.1615 * 1.5 * dogScale * runPlaybackRate;
+const biteTime = 0.625;
+const loopingClips = ["Idle", "Walk", "Run", "Carry"];
+
+type FetchTrip = {
+  plan: FetchPlan;
+  launch: FloorPoint;
+  phase: "flight" | "chase" | "pickup" | "return" | "drop";
+  flightTime: number;
+  waypoint: number;
+};
+
+function face(group: Group, heading: number, turnStep: number) {
+  const turn = MathUtils.euclideanModulo(heading - group.rotation.y + Math.PI, 2 * Math.PI) - Math.PI;
+  group.rotation.y += MathUtils.clamp(turn, -turnStep, turnStep);
+  return Math.abs(turn) <= turnStep;
+}
+
+function headingTo(start: FloorPoint, target: FloorPoint) {
+  return Math.atan2(target.x - start.x, target.z - start.z);
+}
+
+function moveToward(position: FloorPoint, target: FloorPoint, distance: number) {
+  const remaining = Math.hypot(target.x - position.x, target.z - position.z);
+  const fraction = remaining > distance ? distance / remaining : 1;
+  position.x = MathUtils.lerp(position.x, target.x, fraction);
+  position.z = MathUtils.lerp(position.z, target.z, fraction);
+  return fraction === 1;
+}
+
+export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
+  const quality = useGameUI((state) => state.quality);
+  const modelQuality = useDeferredValue(quality);
+  const { scene, animations } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
+  const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
+  const head = useMemo(() => {
+    const bone = scene.getObjectByName("head");
+    if (!bone) throw new Error("Akita head bone missing");
+    return bone;
+  }, [scene]);
+  const dog = useRef<Group>(null);
+  const roaming = useRef<{ target: FloorPoint | null; restTime: number }>({ target: null, restTime: 1.7 });
+  const fetch = useRef<FetchTrip | null>(null);
+  const currentAction = useRef<AnimationAction | null>(null);
+  const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
+  const interaction = useGameUI((state) => state.interaction);
+  const trigger = useGameUI((state) => state.trigger);
+  const tool = useGameUI((state) => state.tool);
+  const lastPetAt = useRef(-Infinity);
+
+  const play = useCallback((name: string, time = 0) => {
+    const clip = AnimationClip.findByName(animations, name);
+    if (!clip) throw new Error("Akita animation missing: " + name);
+
+    const action = mixer.clipAction(clip);
+    const previous = currentAction.current;
+    if (previous === action) return action;
+
+    action.reset();
+    action.time = time;
+    action.timeScale = name === "Run" ? runPlaybackRate : 1;
+    if (!loopingClips.includes(name)) {
+      action.setLoop(LoopOnce, 1);
+      action.clampWhenFinished = true;
+    }
+    action.play();
+    previous?.crossFadeTo(action, 0.25, false);
+    currentAction.current = action;
+    return action;
+  }, [animations, mixer]);
+
+  const rest = useCallback(() => {
+    roaming.current.target = null;
+    roaming.current.restTime = MathUtils.randFloat(2.2, 4.4);
+    play("Idle");
+  }, [play]);
+
+  useEffect(() => {
+    scene.traverse((child) => {
+      if (child instanceof Mesh) child.castShadow = true;
+    });
+    play(playback.current.name, playback.current.time);
+
+    const onFinished = ({ action }: { action: AnimationAction }) => {
+      if (action === currentAction.current && action.getClip().name !== "ReachBall") rest();
+    };
+    mixer.addEventListener("finished", onFinished);
+    return () => {
+      mixer.removeEventListener("finished", onFinished);
+      const action = currentAction.current;
+      if (action) {
+        playback.current.name = action.getClip().name;
+        playback.current.time = action.time;
+      }
+      mixer.stopAllAction();
+      currentAction.current = null;
+    };
+  }, [mixer, play, rest, scene]);
+
+  useEffect(() => {
+    if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
+    playback.current.interactionSequence = interaction.sequence;
+    const toy = ball.current;
+    if (interaction.kind === "ball") {
+      const group = dog.current;
+      if (fetch.current || !group || !toy) return;
+      const plan = planFetch(group.position, toy.position);
+      if (!plan) {
+        useGameUI.getState().setNotice("团子在等球周围空出一点地方。");
+        return;
+      }
+      fetch.current = {
+        plan,
+        launch: { x: toy.position.x, z: toy.position.z },
+        phase: "flight",
+        flightTime: 0,
+        waypoint: 0,
+      };
+      roaming.current.target = null;
+      play("Idle");
+      useGameUI.getState().setNotice("球抛出去了！");
+      return;
+    }
+
+    if (fetch.current && toy) toy.position.y = ballGroundY;
+    fetch.current = null;
+    roaming.current.target = null;
+    play(interactionClips[interaction.kind]);
+  }, [ball, interaction, play]);
+
+  const holdBall = (toy: Mesh) => {
+    // Head-bone units for the opening below the nose.
+    head.localToWorld(toy.position.set(0, -0.0004, -0.00129));
+    toy.position.y = Math.max(ballGroundY, toy.position.y);
+  };
+
+  const advanceFetch = (trip: FetchTrip, group: Group, toy: Mesh, action: AnimationAction, step: number) => {
+    const { pickup, delivery, outbound, homeward } = trip.plan;
+    if (trip.phase === "flight") {
+      trip.flightTime += step;
+      const t = Math.min(1, trip.flightTime / 1.15);
+      toy.position.set(
+        MathUtils.lerp(trip.launch.x, pickup.ball.x, t),
+        ballGroundY + Math.sin(Math.PI * t) * 1.25,
+        MathUtils.lerp(trip.launch.z, pickup.ball.z, t),
+      );
+      toy.rotation.x += step * 5;
+      if (t === 1) trip.phase = "chase";
+      return;
+    }
+
+    if (trip.phase === "pickup" || trip.phase === "drop") {
+      const contacted = action.time >= biteTime;
+      if (trip.phase === "pickup" ? contacted : !contacted) holdBall(toy);
+      if (trip.phase === "drop" && contacted) toy.position.set(delivery.ball.x, ballGroundY, delivery.ball.z);
+      if (action.time < action.getClip().duration) return;
+
+      if (trip.phase === "pickup") {
+        trip.phase = "return";
+        trip.waypoint = 0;
+        play("Carry");
+        useGameUI.getState().setNotice("团子叼起球往回走。");
+      } else {
+        fetch.current = null;
+        rest();
+        useGameUI.getState().setNotice("团子把球叼回来了！");
+      }
+      return;
+    }
+
+    const carrying = trip.phase === "return";
+    const route = carrying ? homeward : outbound;
+    const target = route[trip.waypoint];
+    const heading = target ? headingTo(group.position, target) : (carrying ? delivery.heading : pickup.heading);
+    const aligned = face(group, heading, turnSpeed * step);
+    if (target && aligned) {
+      const running = !carrying && hasRoomToRun(group.position);
+      const movement = play(carrying ? "Carry" : running ? "Run" : "Walk");
+      const speed = running ? runSpeed : walkSpeed;
+      if (moveToward(group.position, target, speed * step * movement.getEffectiveWeight())) trip.waypoint++;
+    } else if (aligned) {
+      trip.phase = carrying ? "drop" : "pickup";
+      play("ReachBall");
+    } else {
+      play(carrying ? "Carry" : "Walk");
+    }
+    if (carrying) holdBall(toy);
+  };
+
+  useFrame(({ camera, size }, delta) => {
+    const step = Math.min(delta, 0.1);
+    mixer.update(step);
+
+    const group = dog.current;
+    const action = currentAction.current;
+    if (!group || !action) return;
+
+    const toy = ball.current;
+    const trip = fetch.current;
+    if (trip && toy) {
+      advanceFetch(trip, group, toy, action, step);
+      return;
+    }
+
+    const activity = roaming.current;
+    const ballPosition = toy?.position ?? ballStart;
+    const clip = action.getClip().name;
+    if (clip === "Idle") {
+      activity.restTime -= step;
+      if (activity.restTime > 0) return;
+      const halfFov = MathUtils.degToRad((camera as PerspectiveCamera).fov / 2);
+      const viewWidthPerDepth = Math.tan(halfFov) * size.width / size.height;
+      activity.target = chooseWalkTarget(group.position, ballPosition, camera.position.z, viewWidthPerDepth);
+      if (activity.target) play("Walk");
+      else rest();
+      return;
+    }
+    const target = activity.target;
+    if (clip !== "Walk" || !target) return;
+    if (!clearsBall(group.position, target, ballPosition)) {
+      rest();
+      return;
+    }
+    const motionStep = step * action.getEffectiveWeight();
+    if (!face(group, headingTo(group.position, target), turnSpeed * motionStep)) return;
+    if (moveToward(group.position, target, walkSpeed * motionStep)) {
+      activity.target = null;
+      if (Math.random() < 0.5) play("Sit");
+      else rest();
+    }
+  });
+
+  const reactToClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    if (tool === "ball" || tool === "brush") {
+      trigger(tool);
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastPetAt.current < 400) return;
+    lastPetAt.current = now;
+    trigger("pet");
+  };
+
+  return (
+    <group
+      ref={dog}
+      position={[0.12, rugSurface, 0.35]}
+      rotation={[0, -0.65, 0]}
+      scale={dogScale}
+      onClick={reactToClick}
+    >
+      <primitive object={scene} />
+    </group>
+  );
+}

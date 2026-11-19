@@ -1,30 +1,18 @@
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, type RefObject } from "react";
-import { Canvas, useFrame, useLoader, useThree, type ThreeEvent } from "@react-three/fiber";
-import {
-  AnimationClip,
-  AnimationMixer,
-  LoopOnce,
-  MathUtils,
-  Mesh,
-  type AnimationAction,
-  type Group,
-  type PerspectiveCamera,
-} from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import akitaHighUrl from "../assets/akita-high.glb?url";
-import akitaLowUrl from "../assets/akita.glb?url";
-import { useGameUI, type InteractionKind } from "../store/useGameUI";
-import { ballStart, chooseWalkTarget, clearsBall, dogBed, foodBowl, rug, type FloorPoint } from "./roomNavigation";
+import { Suspense, useEffect, useRef, type RefObject } from "react";
+import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
+import type { Mesh, PerspectiveCamera } from "three";
+import { useGameUI } from "../store/useGameUI";
+import { AkitaDog } from "./AkitaDog";
+import { ballGroundY, ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
 
 const roomFov = 37;
-const roomHalfFov = MathUtils.degToRad(roomFov / 2);
 
 function StageCamera() {
   const { camera, size } = useThree();
   useEffect(() => {
     const perspective = camera as PerspectiveCamera;
     const portrait = size.width < 640 && size.width < size.height;
-    const distance = Math.max(portrait ? 9.0 : 7.2, 5.4 * size.height / size.width);
+    const distance = Math.max(portrait ? 9.0 : 7.2, 5.7 * size.height / size.width);
     perspective.position.set(0, portrait ? 2.55 : 2.35, distance);
     perspective.lookAt(0, 1.15, 0);
     perspective.updateProjectionMatrix();
@@ -35,23 +23,6 @@ function StageCamera() {
 function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null> }) {
   const trigger = useGameUI((state) => state.trigger);
   const tool = useGameUI((state) => state.tool);
-  const tossedAt = useRef(-10);
-  const interaction = useGameUI((state) => state.interaction);
-
-  useEffect(() => {
-    if (interaction?.kind === "ball") tossedAt.current = 0;
-  }, [interaction]);
-
-  useFrame((_, delta) => {
-    if (!ball.current || tossedAt.current < 0) return;
-    tossedAt.current += delta;
-    const t = tossedAt.current;
-    ball.current.position.x = MathUtils.lerp(ballStart.x, -1.5, Math.min(t / 1.35, 1));
-    ball.current.position.y = 0.2 + Math.max(0, Math.sin(t * Math.PI / 1.35) * 0.75);
-    ball.current.position.z = MathUtils.lerp(ballStart.z, -0.4, Math.min(t / 1.35, 1));
-    ball.current.rotation.x += delta * 5;
-    if (t > 1.35) tossedAt.current = -1;
-  });
 
   const onFloorClick = (event: ThreeEvent<MouseEvent>) => {
     if (tool === "ball") {
@@ -129,7 +100,7 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
           <meshStandardMaterial color="#937451" />
         </mesh>
       </group>
-      <mesh ref={ball} castShadow position={[ballStart.x, 0.2, ballStart.z]}>
+      <mesh ref={ball} castShadow position={[ballStart.x, ballGroundY, ballStart.z]}>
         <sphereGeometry args={[ballStart.radius, 24, 16]} />
         <meshStandardMaterial color="#becd74" roughness={0.9} />
       </mesh>
@@ -156,165 +127,6 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
         </mesh>
       </group>
     </>
-  );
-}
-
-const interactionClips: Record<InteractionKind, string> = {
-  pet: "Pet",
-  call: "LookAround",
-  feed: "Eat",
-  water: "Drink",
-  ball: "Play",
-  brush: "Pet",
-};
-
-const dogScale = 2.65;
-// The matching Walk_F_RM clip advances 0.519 m in one second.
-const walkSpeed = 0.519 * dogScale;
-
-function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
-  const quality = useGameUI((state) => state.quality);
-  const modelQuality = useDeferredValue(quality);
-  const { scene, animations } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
-  const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
-  const dog = useRef<Group>(null);
-  const roaming = useRef<{ target: FloorPoint | null; restTime: number }>({ target: null, restTime: 1.7 });
-  const currentAction = useRef<AnimationAction | null>(null);
-  const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
-  const interaction = useGameUI((state) => state.interaction);
-  const trigger = useGameUI((state) => state.trigger);
-  const tool = useGameUI((state) => state.tool);
-  const lastPetAt = useRef(-Infinity);
-
-  const play = useCallback((name: string, time = 0) => {
-    const clip = AnimationClip.findByName(animations, name);
-    if (!clip) throw new Error("Akita animation missing: " + name);
-
-    const action = mixer.clipAction(clip);
-    const previous = currentAction.current;
-    if (previous === action) return;
-
-    action.reset();
-    action.time = time;
-    if (name !== "Idle" && name !== "Walk") {
-      action.setLoop(LoopOnce, 1);
-      action.clampWhenFinished = true;
-    }
-    action.play();
-    previous?.crossFadeTo(action, 0.25, false);
-    currentAction.current = action;
-  }, [animations, mixer]);
-
-  const rest = useCallback(() => {
-    roaming.current.target = null;
-    roaming.current.restTime = MathUtils.randFloat(2.2, 4.4);
-    play("Idle");
-  }, [play]);
-
-  useEffect(() => {
-    scene.traverse((child) => {
-      if (child instanceof Mesh) child.castShadow = true;
-    });
-    play(playback.current.name, playback.current.time);
-
-    const onFinished = ({ action }: { action: AnimationAction }) => {
-      if (action === currentAction.current) rest();
-    };
-    mixer.addEventListener("finished", onFinished);
-    return () => {
-      mixer.removeEventListener("finished", onFinished);
-      const action = currentAction.current;
-      if (action) {
-        playback.current.name = action.getClip().name;
-        playback.current.time = action.time;
-      }
-      mixer.stopAllAction();
-      currentAction.current = null;
-    };
-  }, [mixer, play, rest, scene]);
-
-  useEffect(() => {
-    if (interaction && interaction.sequence !== playback.current.interactionSequence) {
-      roaming.current.target = null;
-      play(interactionClips[interaction.kind]);
-      playback.current.interactionSequence = interaction.sequence;
-    }
-  }, [interaction, play]);
-
-  useFrame(({ camera, size }, delta) => {
-    const step = Math.min(delta, 0.1);
-    mixer.update(step);
-
-    const group = dog.current;
-    const action = currentAction.current;
-    if (!group || !action) return;
-
-    const activity = roaming.current;
-    const ballPosition = ball.current?.position ?? ballStart;
-    const clip = action.getClip().name;
-    if (clip === "Idle") {
-      activity.restTime -= step;
-      if (activity.restTime > 0) return;
-      const viewWidthPerDepth = Math.tan(roomHalfFov) * size.width / size.height;
-      activity.target = chooseWalkTarget(group.position, ballPosition, camera.position.z, viewWidthPerDepth);
-      if (activity.target) play("Walk");
-      else rest();
-      return;
-    }
-    const target = activity.target;
-    if (clip !== "Walk" || !target) return;
-    if (!clearsBall(group.position, target, ballPosition)) {
-      rest();
-      return;
-    }
-
-    const dx = target.x - group.position.x;
-    const dz = target.z - group.position.z;
-    const heading = Math.atan2(dx, dz);
-    const turn = MathUtils.euclideanModulo(heading - group.rotation.y + Math.PI, 2 * Math.PI) - Math.PI;
-    const motionStep = step * action.getEffectiveWeight();
-    const turnStep = 3.7 * motionStep;
-    if (Math.abs(turn) > turnStep) {
-      group.rotation.y += Math.sign(turn) * turnStep;
-      return;
-    }
-    group.rotation.y = heading;
-
-    const remaining = Math.hypot(dx, dz);
-    const fraction = Math.min(1, walkSpeed * motionStep / remaining);
-    group.position.x = MathUtils.lerp(group.position.x, target.x, fraction);
-    group.position.z = MathUtils.lerp(group.position.z, target.z, fraction);
-
-    if (fraction === 1) {
-      activity.target = null;
-      if (Math.random() < 0.5) play("Sit");
-      else rest();
-    }
-  });
-
-  const reactToClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (tool === "ball" || tool === "brush") {
-      trigger(tool);
-      return;
-    }
-
-    const now = performance.now();
-    if (now - lastPetAt.current < 400) return;
-    lastPetAt.current = now;
-    trigger("pet");
-  };
-
-  return (
-    <group
-      ref={dog}
-      position={[0.12, 0.026, 0.35]}
-      rotation={[0, -0.65, 0]}
-      scale={dogScale}
-      onClick={reactToClick}
-    >
-      <primitive object={scene} />
-    </group>
   );
 }
 

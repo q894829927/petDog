@@ -285,7 +285,8 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 默认的「标准」画质使用 Dogs_Big_pack 的 `Mesh_Akita` 和材质 `M_Akita_color`。「省电」画质使用 `Mesh_Akita_LowPoly` 和材质 `M_Akita_color_M`。两种模型均通过 Unreal glTF Exporter 转为内嵌贴图的 GLB，共用同一组骨骼动画。Web 使用 `GLTFLoader` 按画质加载模型，通过 `AnimationMixer` 混合待机和互动动作。
 
 - `Idle_1` 用于待机，`Idle_2` 用于呼唤，`Idle_3` 用于抚摸与梳毛。
-- `Jump_place` 用于玩球时的原地跳跃。
+- 玩球时先规划追球和返回路线，再投向有空间低头叼球的位置。球落地后用 `Run_F_IP` 跑过去，按对应的根运动步幅移动。低头和抬头复用 `EatDrink_start`、`EatDrink_end`，球在叼住后随头部骨骼移动。返回使用步行动画，团子会在房间前侧的投球点放下球。
+- 往返两程都用犬身的安全距离检查碗和狗窝。直线被挡住时，可经地毯中央转向。抚摸或呼唤等操作可以打断追球，球会落在当前位置。
 - `Eat_loop` 和 `Drink_loop` 各自与 `EatDrink_start`、`EatDrink_end` 合成一段动作。
 - 自主活动会在地毯内随机选取落脚点。选点时为身体留出空间，并检查整段路线能否避开碗、狗窝和球。步行使用 `Walk_F_IP`，按对应根运动 `Walk_F_RM` 的步幅移动。到达后可以站立待机，也可以播放由 `Sitting_start`、`Sitting_loop` 和 `Sitting_end` 合成的坐下休息动作。
 - 球挡住路线时宠物会停下并重新选点。玩家互动会中断走动或休息，动画回应结束后先待机，再选取新的落脚点。
