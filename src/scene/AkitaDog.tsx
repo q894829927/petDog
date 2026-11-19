@@ -15,6 +15,7 @@ import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
 import { useGameUI, type InteractionKind } from "../store/useGameUI";
 import {
+  ballClearance,
   ballGroundY,
   ballStart,
   chooseWalkTarget,
@@ -40,13 +41,15 @@ const turnSpeed = 3.7;
 const walkSpeed = 0.519 * dogScale;
 const runPlaybackRate = 0.7;
 const runSpeed = 1.1615 * 1.5 * dogScale * runPlaybackRate;
-const biteTime = 0.625;
+const biteTime = 0.5;
 const loopingClips = ["Idle", "Walk", "Run", "Carry"];
 
 type FetchTrip = {
   plan: FetchPlan;
   launch: FloorPoint;
+  takeoffDepth: number;
   phase: "flight" | "chase" | "pickup" | "return" | "drop";
+  cancelled: boolean;
   flightTime: number;
   waypoint: number;
 };
@@ -150,10 +153,16 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
         useGameUI.getState().setNotice("团子在等球周围空出一点地方。");
         return;
       }
+      const dx = toy.position.x - group.position.x;
+      const dz = toy.position.z - group.position.z;
+      // Lift a nearby ball away from the muzzle without sending it off the side of the screen.
+      const takeoffDepth = Math.max(0, ballClearance - Math.hypot(dx, dz)) * (dz < 0 ? -1 : 1);
       fetch.current = {
         plan,
         launch: { x: toy.position.x, z: toy.position.z },
+        takeoffDepth,
         phase: "flight",
+        cancelled: false,
         flightTime: 0,
         waypoint: 0,
       };
@@ -163,15 +172,20 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       return;
     }
 
-    if (fetch.current && toy) toy.position.y = ballGroundY;
-    fetch.current = null;
+    const trip = fetch.current;
+    if (trip?.phase === "flight") {
+      trip.cancelled = true;
+    } else {
+      if (trip && toy) toy.position.y = ballGroundY;
+      fetch.current = null;
+    }
     roaming.current.target = null;
     play(interactionClips[interaction.kind]);
   }, [ball, interaction, play]);
 
   const holdBall = (toy: Mesh) => {
-    // Head-bone units for the opening below the nose.
-    head.localToWorld(toy.position.set(0, -0.0004, -0.00129));
+    // Head-bone units for the center of a ball held by the front of the jaw.
+    head.localToWorld(toy.position.set(0, -0.0005, -0.00185));
     toy.position.y = Math.max(ballGroundY, toy.position.y);
   };
 
@@ -180,13 +194,20 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     if (trip.phase === "flight") {
       trip.flightTime += step;
       const t = Math.min(1, trip.flightTime / 1.15);
+      // Cross the room near the top of the arc and descend clear of the dog.
+      const travel = MathUtils.smootherstep(t, 0, 1);
+      const lift = 1 - (1 - 2 * t) ** 4;
+      const takeoff = trip.takeoffDepth * MathUtils.smoothstep(t, 0, 0.1) * (1 - travel);
       toy.position.set(
-        MathUtils.lerp(trip.launch.x, pickup.ball.x, t),
-        ballGroundY + Math.sin(Math.PI * t) * 1.25,
-        MathUtils.lerp(trip.launch.z, pickup.ball.z, t),
+        MathUtils.lerp(trip.launch.x, pickup.ball.x, travel),
+        ballGroundY + lift * 2.1,
+        MathUtils.lerp(trip.launch.z, pickup.ball.z, travel) + takeoff,
       );
       toy.rotation.x += step * 5;
-      if (t === 1) trip.phase = "chase";
+      if (t === 1) {
+        if (trip.cancelled) fetch.current = null;
+        else trip.phase = "chase";
+      }
       return;
     }
 
@@ -215,7 +236,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     const heading = target ? headingTo(group.position, target) : (carrying ? delivery.heading : pickup.heading);
     const aligned = face(group, heading, turnSpeed * step);
     if (target && aligned) {
-      const running = !carrying && hasRoomToRun(group.position);
+      const running = !carrying && hasRoomToRun(group.position, pickup.ball);
       const movement = play(carrying ? "Carry" : running ? "Run" : "Walk");
       const speed = running ? runSpeed : walkSpeed;
       if (moveToward(group.position, target, speed * step * movement.getEffectiveWeight())) trip.waypoint++;
@@ -223,7 +244,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       trip.phase = carrying ? "drop" : "pickup";
       play("ReachBall");
     } else {
-      play(carrying ? "Carry" : "Walk");
+      play(carrying ? "Carry" : target ? "Walk" : "Idle");
     }
     if (carrying) holdBall(toy);
   };

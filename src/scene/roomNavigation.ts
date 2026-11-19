@@ -9,6 +9,7 @@ export const ballGroundY = rugSurface + ballStart.radius;
 
 // The scaled Akita reaches 1.24 units from its center near the floor.
 const dogClearance = 1.25;
+export const ballClearance = dogClearance + ballStart.radius;
 // The running clip reaches 1.36 units near the floor.
 const runClearance = 1.38;
 const walkRadius = rug.radius - dogClearance;
@@ -49,14 +50,15 @@ function routeTo(start: FloorPoint, destination: FloorPoint, dogRadius: number) 
   return null;
 }
 
-export function hasRoomToRun(position: FloorPoint) {
+export function hasRoomToRun(position: FloorPoint, ball: FloorPoint) {
   return Math.hypot(position.x - rug.x, position.z - rug.z) <= rug.radius - runClearance &&
-    clearsRoomProps(position, position, runClearance);
+    clearsRoomProps(position, position, runClearance) &&
+    Math.hypot(position.x - ball.x, position.z - ball.z) >= runClearance + ballStart.radius;
 }
 
 function fetchStop(ball: FloorPoint, heading: number) {
-  // The muzzle reaches 0.81 units forward at the bottom of ReachBall.
-  const reach = 0.81;
+  // The ball's center is 0.945 units forward at contact in ReachBall.
+  const reach = 0.945;
   return {
     ball,
     heading,
@@ -67,6 +69,8 @@ function fetchStop(ball: FloorPoint, heading: number) {
 const pickupStops = [
   fetchStop({ x: -1.45, z: -0.5 }, -Math.PI / 2),
   fetchStop({ x: 1.45, z: 0.22 }, Math.PI / 2),
+  fetchStop({ x: 0, z: 1.85 }, 0),
+  fetchStop({ x: 1.48, z: -0.29 }, 2.2),
 ];
 const deliveryStop = fetchStop(ballStart, Math.PI / 3);
 
@@ -82,6 +86,7 @@ export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null
   let farthest = -1;
   for (const pickup of pickupStops) {
     if (Math.hypot(pickup.ball.x - ball.x, pickup.ball.z - ball.z) < 0.3) continue;
+    if (Math.hypot(pickup.ball.x - start.x, pickup.ball.z - start.z) < ballClearance) continue;
     const distance = Math.hypot(pickup.approach.x - start.x, pickup.approach.z - start.z);
     if (distance <= farthest) continue;
     const outbound = routeTo(start, pickup.approach, runClearance);
