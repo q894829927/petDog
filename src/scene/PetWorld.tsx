@@ -1,9 +1,10 @@
 import { Suspense, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Vector2, type Mesh, type PerspectiveCamera } from "three";
+import { Canvas, events, useThree, type RootStore, type ThreeEvent } from "@react-three/fiber";
+import { SkinnedMesh, Vector2, type Mesh, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
 import { PlayerHand, type HandContact } from "./PlayerHand";
+import { createNearbyTouchPicker } from "./petTouch";
 import { ballGroundY, ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
 
 const roomFov = 37;
@@ -11,6 +12,30 @@ const bowlProfile = [
   [0, 0.024], [0.26, 0.024], [0.32, 0.11], [0.31, 0.116],
   [0.29, 0.11], [0.246, 0.047], [0, 0.047],
 ].map(([x, y]) => new Vector2(x, y));
+
+function roomEvents(store: RootStore) {
+  const base = events(store);
+  const pickNearby = createNearbyTouchPicker();
+  let allowNearby = false;
+  const manager: ReturnType<typeof events> = {
+    ...base,
+    compute(event, state) {
+      base.compute?.(event, state);
+      allowNearby = "pointerType" in event && event.pointerType === "touch" && event.isPrimary &&
+        (event.type === "pointerdown" || (event.type === "pointermove" && (event.buttons & 1) !== 0));
+    },
+    filter(hits, { scene, camera, pointer, size }) {
+      if (!allowNearby) return hits;
+      const { tool, panel, foodOpen } = useGameUI.getState();
+      if (tool === "ball" || panel || foodOpen || hits.some(({ object }) => object instanceof SkinnedMesh)) return hits;
+      const mesh = scene.getObjectByName("Akita")?.getObjectByProperty("isSkinnedMesh", true);
+      if (!(mesh instanceof SkinnedMesh)) return hits;
+      const nearby = pickNearby(mesh, camera, pointer, size.width, size.height);
+      return nearby ? [nearby, ...hits] : hits;
+    },
+  };
+  return manager;
+}
 
 function FoodBowl() {
   const bowl = useGameUI((state) => state.bowl);
@@ -171,6 +196,7 @@ export function PetWorld() {
   return (
     <div className="world-canvas" aria-label="秋田犬的 3D 宠物房间" onPointerUp={releaseHand} onPointerCancel={cancelHand}>
       <Canvas
+        events={roomEvents}
         shadows={highQuality}
         dpr={highQuality ? [1, 1.75] : [1, 1.1]}
         camera={{ fov: roomFov, position: [0, 2.35, 7.2], near: 0.1, far: 50 }}

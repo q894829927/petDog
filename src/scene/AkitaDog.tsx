@@ -528,6 +528,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       vertices: [face.a, face.b, face.c],
       weights: barycoord,
       pointer: event.pointerId,
+      touch: event.pointerType === "touch",
       screenPoint: event.pointer.clone(),
       gesture,
       startedAt,
@@ -599,6 +600,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
 
   return (
     <group
+      name="Akita"
       ref={dog}
       position={[0.12, rugSurface, 0.35]}
       rotation={[0, -0.65, 0]}

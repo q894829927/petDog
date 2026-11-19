@@ -1,7 +1,9 @@
-import { SkinnedMesh, Vector3, type Intersection, type Object3D } from "three";
+import { Matrix4, SkinnedMesh, Triangle, Vector3, Vector4, type Camera, type Intersection, type Object3D, type Vector2 } from "three";
 import type { PetPart } from "../store/useGameUI";
 
 const headBones = /^(head|mouth|nose|tongue_|eye_|Ear_)/;
+const touchRadius = 10;
+const cameraForward = new Vector3(0, 0, -1);
 
 export function hitPetPart(
   { object, face, point, barycoord }: Pick<Intersection, "object" | "face" | "point" | "barycoord">,
@@ -37,4 +39,75 @@ export function hitPetPart(
   }
   if (spineWeight > 0.5 && point.y * spineWeight > spineHeight) return "back";
   return null;
+}
+
+export function createNearbyTouchPicker() {
+  const meshToClip = new Matrix4();
+  const triangle = new Triangle();
+  const clip = new Vector4();
+  const vertex = new Vector3();
+  const origin = new Vector3();
+  const closest = new Vector3();
+  const weights = new Vector3();
+  const chosenWeights = new Vector3();
+  let coords = new Float32Array(0);
+
+  return (mesh: SkinnedMesh, camera: Camera, pointer: Vector2, width: number, height: number): Intersection<SkinnedMesh> | null => {
+    // Project the current skinned pose once for the whole touch area.
+    const { geometry } = mesh;
+    const indices = geometry.index!.array;
+    const count = geometry.attributes.position.count;
+    if (coords.length !== count * 4) coords = new Float32Array(count * 4);
+    meshToClip.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(mesh.matrixWorld);
+    for (let index = 0; index < count; index++) {
+      mesh.getVertexPosition(index, vertex);
+      clip.set(vertex.x, vertex.y, vertex.z, 1).applyMatrix4(meshToClip);
+      const w = 1 / clip.w;
+      const offset = index * 4;
+      coords[offset] = (clip.x * w - pointer.x) * width / 2;
+      coords[offset + 1] = (clip.y * w - pointer.y) * height / 2;
+      coords[offset + 2] = clip.z * w;
+      coords[offset + 3] = w;
+    }
+
+    let bestDistance = touchRadius ** 2;
+    let bestDepth = Infinity;
+    let bestFace = -1;
+    for (let index = 0; index < indices.length; index += 3) {
+      const a = indices[index] * 4;
+      const b = indices[index + 1] * 4;
+      const c = indices[index + 2] * 4;
+      const ax = coords[a], bx = coords[b], cx = coords[c];
+      const ay = coords[a + 1], by = coords[b + 1], cy = coords[c + 1];
+      if (Math.min(ax, bx, cx) > touchRadius || Math.max(ax, bx, cx) < -touchRadius ||
+          Math.min(ay, by, cy) > touchRadius || Math.max(ay, by, cy) < -touchRadius) continue;
+      triangle.a.set(ax, ay, 0);
+      triangle.b.set(bx, by, 0);
+      triangle.c.set(cx, cy, 0);
+      if (!triangle.isFrontFacing(cameraForward)) continue;
+      const distance = triangle.closestPointToPoint(origin, closest).lengthSq();
+      if (distance > bestDistance + 0.001 || !triangle.getBarycoord(closest, weights)) continue;
+      const depth = coords[a + 2] * weights.x + coords[b + 2] * weights.y + coords[c + 2] * weights.z;
+      if (distance >= bestDistance - 0.001 && depth >= bestDepth) continue;
+      bestDistance = distance;
+      bestDepth = depth;
+      bestFace = index;
+      // Convert the screen-space weights back to the tracked point on the 3D surface.
+      chosenWeights.set(weights.x * coords[a + 3], weights.y * coords[b + 3], weights.z * coords[c + 3]);
+      chosenWeights.divideScalar(chosenWeights.x + chosenWeights.y + chosenWeights.z);
+    }
+    if (bestFace < 0) return null;
+
+    const a = indices[bestFace], b = indices[bestFace + 1], c = indices[bestFace + 2];
+    mesh.getVertexPosition(a, triangle.a);
+    mesh.getVertexPosition(b, triangle.b);
+    mesh.getVertexPosition(c, triangle.c);
+    const point = triangle.a.clone().multiplyScalar(chosenWeights.x)
+      .addScaledVector(triangle.b, chosenWeights.y).addScaledVector(triangle.c, chosenWeights.z).applyMatrix4(mesh.matrixWorld);
+    return {
+      object: mesh, point, distance: camera.position.distanceTo(point), barycoord: chosenWeights.clone(),
+      face: { a, b, c, normal: triangle.getNormal(new Vector3()), materialIndex: 0 },
+      faceIndex: bestFace / 3,
+    };
+  };
 }

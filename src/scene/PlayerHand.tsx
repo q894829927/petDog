@@ -19,6 +19,7 @@ export type HandContact = {
   vertices: readonly [number, number, number];
   weights: Vector3;
   pointer: number;
+  touch: boolean;
   screenPoint: Vector2;
   gesture: HandGesture;
   startedAt: number | null;
@@ -36,6 +37,7 @@ const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
 const thumbCurls: Record<HandGesture, number> = { head: 0.105, chin: 0.22, back: 0.105, brush: 0.24 };
 const palmContact: Record<HandGesture, number> = { head: 0.3, chin: 0, back: 0.82, brush: 0.26 };
 const contactGrace = 0.11;
+const touchContactGrace = 0.18;
 const reachTime = 0.15;
 const retractTime = 0.23;
 const gestureDelay = 0.065;
@@ -154,7 +156,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     if (disabled || (target && (performance.now() >= target.visibleUntil || (tool === "brush") !== (target.gesture === "brush")))) {
       contact.current = null;
       target = null;
-      pose.missedFor = contactGrace;
+      pose.missedFor = touchContactGrace;
     }
 
     const appearing = pose.reach === 0;
@@ -213,7 +215,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     } else {
       pose.missedFor += step;
     }
-    const reaching = pose.missedFor < contactGrace;
+    const grace = pose.lastContact?.touch && pose.lastContact.pressed ? touchContactGrace : contactGrace;
+    const reaching = pose.missedFor < grace;
     pose.reach = MathUtils.clamp(pose.reach + (reaching ? step / reachTime : -step / retractTime), 0, 1);
     if (pose.reach === 0 || !pose.lastContact) {
       pose.lastContact = null;
