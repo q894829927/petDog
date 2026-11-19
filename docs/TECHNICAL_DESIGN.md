@@ -127,7 +127,7 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - id：主键。
 - user_id：唯一外键，一个账号首版只拥有一只宠物。
 - name：宠物名字。
-- breed_id：犬种标识，对应客户端或服务端维护的可用犬种目录。
+- breed_id：目标犬种标识，对应客户端或服务端维护的可用犬种目录；当前 001_initial.sql 尚未包含该字段，启用犬种选择时通过新增版本化迁移加入。
 - personality：个体性格配置，与犬种默认行为倾向分开保存。
 - adopted_at：领养时间。
 - hunger：饱腹值。
@@ -216,7 +216,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 ### 宠物
 
 - GET /breeds：获取当前开放的犬种目录（规划接口，按实际接入阶段实现）。
-- POST /pet：首次创建宠物，携带 breedId、名字和个体性格；服务端校验 breedId 是否开放。
+- POST /pet：现有首次创建宠物接口；多犬种功能启用后扩展 breedId、名字和个体性格，服务端校验 breedId 是否开放。
 - GET /pet：获取并结算宠物状态。
 - PATCH /pet/profile：修改允许编辑的档案字段。
 - POST /pet/actions：提交互动动作。
