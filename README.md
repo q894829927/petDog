@@ -22,10 +22,10 @@
 ## 技术栈
 
 - 前端：Vite、React、TypeScript、Three.js、React Three Fiber、Zustand
-- 后端：Node.js、TypeScript、Fastify
-- 数据库：SQLite、Drizzle ORM
+- 后端：Node.js 22.18+、TypeScript、Fastify
+- 数据库：SQLite、Node.js 参数化语句、版本化 SQL 迁移
 - 认证：Argon2id、服务端 Session、HttpOnly Cookie
-- 测试：Vitest、Playwright
+- 测试：Node.js 测试运行器、浏览器交互验证
 
 ## 当前部署状态
 
@@ -35,17 +35,25 @@
 
 发布流程：推送 main → Actions 构建 dist 并更新 site 分支 → ECS 专属 systemd timer 每约 3 分钟检查并发布。
 
-首次接入 ECS 需要执行一次性安装，详见 [部署与发布方案](docs/DEPLOYMENT.md)。
+前端静态站点已接入 ECS。账号和存档 API 通过独立工作流构建发布包，首次安装见 [部署与发布方案](docs/DEPLOYMENT.md#31-api-首次安装)。
 
 ## 本地开发
 
-前端开发：先执行 npm install，再执行 npm run dev；生产构建执行 npm run build。当前是单目录 Vite 前端，后端尚未初始化。
+前端执行 `npm ci` 和 `npm run dev`，默认地址为 `http://127.0.0.1:5173/games/petdog/`。另开终端运行 API：
+
+```sh
+npm --prefix apps/api ci
+npm --prefix apps/api run build
+npm --prefix apps/api start
+```
+
+Vite 将同源 `/pet-api/` 请求转发到本地 API。点击顶部云图标可以注册、登录和领养。测试执行 `npm --prefix apps/api test`，静态站点构建执行 `npm run build`。
 
 ## 部署
 
-- 前端计划部署在 Game-Portal 的 /games/petdog/。
+- 前端部署在 Game-Portal 的 /games/petdog/。
 - API 计划通过同域 /pet-api/ 路径反向代理到 ECS 上的独立 Node.js 服务。
 - 前端静态发布沿用 Game-Portal 的 Vite 静态站点流程。
 - 后端使用独立的构建、发布、systemd 服务和健康检查流程。
 
-当前前端原型包含全屏 3D 房间和 Warm Flat 悬浮 HUD。“团子”使用 Dogs_Big_pack 的 Akita（秋田犬）试跑骨骼动画，属性和互动状态为演示数据。正式首发宠物规划为柴犬。
+当前房间使用 Dogs_Big_pack 的 Akita（秋田犬）验证走动、吃喝、叼球、呼唤和抚摸、梳毛与休息。访客可用示例宠物试玩。连上账号 API 后，领养档案、宠物状态和互动进度由服务端保存。正式首发宠物规划为柴犬。

@@ -1,12 +1,12 @@
 # 倩岚汪 — 技术设计文档
 
 - 文档版本：0.1
-- 状态：初始架构
+- 状态：前端原型与账号存档 API 已实现
 - 目标：支持 3D 宠物互动、账号系统、跨设备云端存档和按现实时间结算的宠物状态
 
 ## 当前 UI 设计基线
 
-2026-11 确定 [Warm Flat 全屏 HUD 规范](UI_DESIGN_BASELINE.md)。当前前端已实现 R3F 房间、Akita 骨骼动画、交互工具与低频 Zustand UI 状态。动画通过 `useFrame` 更新。服务端 API 和真实存档待实现，HUD 显示演示数值。
+2026-11 确定 [Warm Flat 全屏 HUD 规范](UI_DESIGN_BASELINE.md)。R3F 房间通过 `useFrame` 更新动作，Zustand 管理低频界面状态和云端快照。访客看到演示数值，已领养的账号显示 API 返回的宠物状态。
 
 ## 1. 总体架构
 
@@ -35,31 +35,26 @@
 - React + TypeScript：界面和应用结构。
 - Three.js：3D 渲染基础。
 - React Three Fiber：在 React 中组织 3D 场景。
-- Drei：加载 GLB、动画和常用 3D 辅助组件。
+- GLTFLoader 与 AnimationMixer：加载和混合宠物骨骼动画。
 - Zustand：本地交互状态、场景状态和 UI 状态。
-- TanStack Query：服务端数据获取、缓存和失效刷新。
-- Zod：共享请求与响应结构校验。
+- Fetch：同源 API 请求、重回页面同步和动作保存队列。
 
 ### 后端
 
-- Node.js LTS + TypeScript。
+- Node.js 22.18+ 与 TypeScript。
 - Fastify：HTTP API。
-- SQLite：单机持久化数据库。
-- Drizzle ORM：Schema、查询和迁移。
-- better-sqlite3：SQLite 驱动。
+- SQLite：Node.js 内置驱动、参数化语句和版本化 SQL 迁移。
 - Argon2id：密码哈希。
-- Zod：输入验证。
-- Vitest：单元与集成测试。
+- Fastify JSON Schema：输入验证。
+- Node.js 测试运行器：认证、并发、事务、离线时间和持久化验证。
 
 SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据库文件放在仓库之外，使用 WAL 模式、短事务和备份策略。未来需要多实例部署或高并发写入时，再迁移 PostgreSQL。
 
 ## 3. 仓库结构
 
-建议采用 npm workspaces：
-
-- apps/web：React + Three.js 前端。
-- apps/api：Fastify 后端。
-- packages/shared：前后端共用的类型、Schema 和常量。
+- src：React + Three.js 前端。
+- apps/api：具有独立依赖和构建的 Fastify 后端。
+- shared：前后端共用的类型和常量。
 - docs：产品、技术、部署与验收文档。
 - .github/workflows：前端发布和后端 CI 工作流。
 
@@ -100,7 +95,6 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - pet：宠物创建、档案、状态读取。
 - simulation：根据服务器时间结算自然变化。
 - interaction：处理抚摸、喂食、喝水、玩耍和清洁。
-- inventory：物品数量与消耗。
 - persistence：数据库访问和事务。
 - health：服务健康检查。
 
@@ -114,16 +108,12 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - email：唯一登录邮箱。
 - password_hash：Argon2id 哈希。
 - created_at：创建时间。
-- email_verified_at：邮箱验证时间，可空。
 
 ### sessions
 
-- id：主键。
+- token_hash：主键，Session 随机令牌的哈希值。
 - user_id：所属用户。
-- token_hash：Session 随机令牌的哈希值。
 - expires_at：过期时间。
-- created_at：创建时间。
-- last_used_at：最近使用时间。
 
 数据库只保存 Session 令牌哈希，不保存浏览器 Cookie 中的原始令牌。
 
@@ -132,7 +122,6 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - id：主键。
 - user_id：唯一外键，一个账号首版只拥有一只宠物。
 - name：宠物名字。
-- species：首版固定为 shiba_inu。
 - personality：性格配置。
 - adopted_at：领养时间。
 - hunger：饱腹值。
@@ -141,18 +130,16 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - cleanliness：清洁度。
 - happiness：心情值。
 - affection：亲密度。
-- sleep_state：睡眠状态。
+- sleeping：睡眠状态。
 - last_simulated_at：上次结算时间。
 - version：乐观并发版本号。
-- created_at、updated_at：创建和更新时间。
 
 ### pet_actions
 
-- id：主键。
 - pet_id：所属宠物。
 - request_id：客户端生成的幂等请求 ID，对宠物唯一。
-- action_type：互动类型。
-- payload：必要的动作参数。
+- action：互动类型。
+- result：首次提交成功后的宠物快照。
 - created_at：服务端记录时间。
 
 互动日志用于幂等处理、排查问题和后续行为统计，不记录不必要的个人信息。
@@ -168,7 +155,7 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 3. 使用服务端当前 UTC 时间减去 last_simulated_at，得到 elapsedSeconds。
 4. 根据经过时间、睡眠状态和性格参数结算需求变化。
 5. 将数值限制在 0—100。
-6. 更新 last_simulated_at、version 和 updated_at。
+6. 更新 last_simulated_at 和 version。
 7. 提交事务并返回权威状态。
 
 SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结算同一只宠物时发生丢失更新。
@@ -184,7 +171,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - 所有状态值限制在 0—100。
 - 不设计死亡或永久损失。
 
-具体速率集中定义在 simulation 配置中，使用固定时间步或解析式计算，避免按每秒循环更新数据库。
+具体速率集中定义在 `apps/api/src/simulation.ts`。结算使用服务端记录的经过时长直接计算，睡眠时恢复精力。当精力低于 25 时，房间里的宠物更早回到狗窝休息。
 
 ### 7.3 交互结算
 
@@ -192,14 +179,12 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 
 例如喂食：
 1. 结算离线和当前自然变化。
-2. 检查宠物是否存在、物品是否充足、动作是否有效。
-3. 扣除食物数量。
-4. 恢复饱腹值并更新心情。
-5. 写入 pet_actions。
-6. 更新宠物版本并提交。
-7. 返回最新宠物状态和物品数量。
+2. 验证领养状态、动作类型、请求 ID 和宠物版本。
+3. 恢复饱腹值并更新心情。
+4. 更新宠物版本并写入 pet_actions，保存在同一事务中。
+5. 返回服务端宠物快照。
 
-同一个 request_id 重试时返回第一次执行结果，不再次扣除物品或增加属性。
+同一个 request_id 重试时返回第一次执行结果。当前饮食托盘提供可随时补充的标准狗粮和清水。
 
 ## 8. 并发与跨设备同步
 
@@ -207,7 +192,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - 每次成功写入使 version 加一。
 - 互动请求携带 expectedVersion 和 requestId。
 - 版本冲突时服务端返回最新状态，客户端刷新后再决定是否重试。
-- 前端在页面恢复焦点时重新获取宠物状态。
+- 前端在页面恢复焦点时重新获取宠物状态。读取和写入携带当前账号 ID，Cookie 对应账号变化时返回冲突并提示重新同步。
 - 游戏运行期间以 30—60 秒低频刷新作为兜底；互动完成后立即更新。
 - 首版不使用 WebSocket。只有需要实时双设备观战或即时同步时再引入。
 
@@ -234,13 +219,12 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - requestId：幂等请求 ID。
 - expectedVersion：客户端已知宠物版本。
 - action：pet、feed、drink、play、brush、sleep、wake、call。
-- payload：动作所需参数。
 
-服务端返回宠物完整快照、物品变化和新版本号。
+服务端返回宠物快照和新版本号。客户端在完成吃喝、叼回和有效梳毛后提交对应动作。
 
 ### 健康检查
 
-- GET /healthz：返回服务健康状态，不暴露数据库凭据、路径和内部环境变量。
+- GET /pet-api/healthz：返回服务健康状态。
 
 ## 10. 身份认证与安全
 

@@ -17,6 +17,7 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
+import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
 import { hitPetPart } from "./petTouch";
 import {
@@ -49,6 +50,7 @@ const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap"];
 
 type FetchTrip = {
   plan: FetchPlan;
+  owner: number | null;
   launch: FloorPoint;
   takeoffDepth: number;
   phase: "flight" | "chase" | "pickup" | "return" | "drop";
@@ -57,7 +59,7 @@ type FetchTrip = {
   waypoint: number;
 };
 
-type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number };
+type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number; owner: number | null };
 
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
   const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
@@ -120,7 +122,11 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
   const fetch = useRef<FetchTrip | null>(null);
   const approach = useRef<Approach | null>(null);
-  const nap = useRef<{ timeLeft: number; pending: Interaction | null } | null>(null);
+  const nap = useRef<{
+    timeLeft: number;
+    pending: { interaction: Interaction; owner: number | null } | null;
+    owner: number | null;
+  } | null>(null);
   const currentAction = useRef<AnimationAction | null>(null);
   const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
   const interaction = useGameUI((state) => state.interaction);
@@ -171,6 +177,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
         const ui = useGameUI.getState();
         ui.setBowl(dining.kind, 0);
         ui.setNotice(dining.kind === "feed" ? "团子吃完了狗粮。" : "团子喝完了水。");
+        recordPetAction(dining.kind === "feed" ? "feed" : "drink", dining.owner);
       }
       rest();
     };
@@ -187,11 +194,16 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     };
   }, [mixer, play, rest, scene]);
 
-  const startInteraction = useCallback((interaction: Interaction) => {
+  const startInteraction = useCallback((interaction: Interaction, owner: number | null) => {
     const toy = ball.current;
     const group = dog.current;
+    const { pet } = useCloudPet.getState();
     if (interaction.kind === "ball") {
       if (fetch.current || !group || !toy) return;
+      if (pet && pet.energy < 8) {
+        useGameUI.getState().setNotice("团子有点累，休息一会儿再玩球。");
+        return;
+      }
       const plan = planFetch(group.position, toy.position);
       if (!plan) {
         useGameUI.getState().setNotice("团子在等球周围空出一点地方。");
@@ -203,6 +215,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       const takeoffDepth = Math.max(0, ballClearance - Math.hypot(dx, dz)) * (dz < 0 ? -1 : 1);
       fetch.current = {
         plan,
+        owner,
         launch: { x: toy.position.x, z: toy.position.z },
         takeoffDepth,
         phase: "flight",
@@ -226,7 +239,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       if (kind === "call") {
         const plan = planCall(group.position, floorBall) ??
           { route: [], heading: headingTo(group.position, { x: 0, z: 7.2 }) };
-        approach.current = { ...plan, waypoint: 0, kind };
+        approach.current = { ...plan, waypoint: 0, kind, owner };
         ui.setNotice("团子听到了你的呼唤！");
       } else {
         const plan = planMeal(group.position, floorBall);
@@ -234,7 +247,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
           ui.setNotice("团子还没找到走到碗边的路。");
           return;
         }
-        approach.current = { ...plan, waypoint: 0, kind };
+        approach.current = { ...plan, waypoint: 0, kind, owner };
         ui.setBowl(kind, 3);
         ui.setNotice(kind === "feed" ? "狗粮放好了，团子正往碗边走。" : "清水倒好了，团子正往碗边走。");
       }
@@ -251,19 +264,23 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     roaming.current.target = null;
     if (kind === "call") play("LookAround");
     else if (kind === "feed" || kind === "water") play("Idle");
-    else play(kind === "brush" ? "Brush" : petClips[interaction.part]);
+    else {
+      play(kind === "brush" ? "Brush" : petClips[interaction.part]);
+      recordPetAction(kind, owner);
+    }
   }, [ball, play]);
 
   useEffect(() => {
     if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
     playback.current.interactionSequence = interaction.sequence;
+    const owner = useCloudPet.getState().accountId;
     const sleeping = nap.current;
     if (sleeping) {
-      sleeping.pending = interaction;
+      sleeping.pending = { interaction, owner };
       if (currentAction.current?.getClip().name === "Nap") play("NapUp");
       useGameUI.getState().setNotice("团子醒了，正在起身。");
     } else {
-      startInteraction(interaction);
+      startInteraction(interaction, owner);
     }
   }, [interaction, play, startInteraction]);
 
@@ -310,6 +327,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
         fetch.current = null;
         rest();
         useGameUI.getState().setNotice("团子把球叼回来了！");
+        recordPetAction("play", trip.owner);
       }
       return;
     }
@@ -348,14 +366,18 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       const finished = action.time >= action.getClip().duration;
       if (clip === "NapDown" && finished) {
         play(sleeping.pending ? "NapUp" : "Nap");
-        if (!sleeping.pending) useGameUI.getState().setNotice("团子在狗窝旁打起了盹。");
+        if (!sleeping.pending) {
+          useGameUI.getState().setNotice("团子在狗窝旁打起了盹。");
+          recordPetAction("sleep", sleeping.owner);
+        }
       } else if (clip === "Nap") {
         sleeping.timeLeft -= step;
         if (sleeping.timeLeft <= 0) play("NapUp");
       } else if (clip === "NapUp" && finished) {
         nap.current = null;
+        recordPetAction("wake", sleeping.owner);
         rest();
-        if (sleeping.pending) startInteraction(sleeping.pending);
+        if (sleeping.pending) startInteraction(sleeping.pending.interaction, sleeping.pending.owner);
       }
       return;
     }
@@ -388,12 +410,13 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
           rest();
           roaming.current.restTime = 7;
           useGameUI.getState().setNotice(visit.route.length ? "团子来到你面前，等你摸摸它。" : "团子停下来望着你。");
+          recordPetAction("call", visit.owner);
         }
       } else if (kind === "nap") {
         play("Idle");
         if (face(group, heading, turnSpeed * step)) {
           approach.current = null;
-          nap.current = { timeLeft: MathUtils.randFloat(7, 11), pending: null };
+          nap.current = { timeLeft: MathUtils.randFloat(7, 11), pending: null, owner: visit.owner };
           play("NapDown");
         }
       } else if (action.getClip().name !== mealClips[kind]) {
@@ -417,12 +440,14 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     if (clip === "Idle") {
       activity.restTime -= step;
       if (activity.restTime > 0) return;
-      if (activity.activeTime >= activity.napAfter) {
+      const { accountId: owner, pet } = useCloudPet.getState();
+      const napAfter = pet?.sleeping ? 0 : pet && pet.energy < 25 ? 8 : activity.napAfter;
+      if (activity.activeTime >= napAfter) {
         activity.activeTime = 0;
         activity.napAfter = MathUtils.randFloat(24, 38);
         const plan = planNap(group.position, ballPosition);
         if (plan) {
-          approach.current = { ...plan, kind: "nap", waypoint: 0 };
+          approach.current = { ...plan, kind: "nap", waypoint: 0, owner };
           useGameUI.getState().setNotice("团子准备去狗窝旁休息。");
           return;
         }

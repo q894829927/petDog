@@ -1,0 +1,23 @@
+[Unit]
+Description=PetDog account and saved game API
+After=network.target
+
+[Service]
+Type=simple
+User=petdog
+Group=petdog
+WorkingDirectory=/opt/petdog-api/current
+StateDirectory=petdog
+StateDirectoryMode=0700
+UMask=0077
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/petdog/api.env
+ExecStart=/usr/bin/node dist/apps/api/src/main.js
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

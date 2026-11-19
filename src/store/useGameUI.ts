@@ -4,7 +4,7 @@ export type ToolMode = "pet" | "ball" | "brush";
 export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush";
 export type MealKind = "feed" | "water";
 export type PetPart = "head" | "chin" | "back";
-export type ActivePanel = "profile" | "settings" | null;
+export type ActivePanel = "profile" | "settings" | "account" | null;
 export type StatKey = "hunger" | "water" | "energy" | "clean";
 
 export type Interaction = { kind: InteractionKind; part: PetPart; sequence: number };

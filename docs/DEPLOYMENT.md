@@ -1,7 +1,7 @@
 # 倩岚汪 — 部署与发布方案
 
 - 文档版本：0.2
-- 当前状态：前端自动发布工作流已提交；ECS 首次安装与线上验证待执行；后端尚未实现
+- 当前状态：前端已在 ECS 自动发布；API 已实现并由独立工作流打包，待在 ECS 首次安装
 - 仓库：q894829927/petDog
 - 前端路径：/games/petdog/
 - API 路径：/pet-api/
@@ -96,6 +96,14 @@ curl -fsS https://47.119.122.133/games/petdog/ -o /dev/null
 
 Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理到 127.0.0.1:3180。Cookie 在同一站点下工作，前端不需要开放宽泛 CORS。
 
+### 3.1 API 首次安装
+
+1. 从 [Test and package PetDog API](https://github.com/q894829927/petDog/actions/workflows/build-api.yml) 下载目标提交的发布包。核对包内 `.source-sha`，解包到 `/opt/petdog-api/releases/<commit-sha>/`，使用 Node.js 22.18+ 执行 `npm ci --omit=dev`。
+2. 创建 `petdog` 服务账号并将 `/opt/petdog-api/current` 指向该发布目录。创建权限为 0600 的 `/etc/petdog/api.env`，写入 `PETDOG_DB=/var/lib/petdog/petdog.sqlite` 和 `PETDOG_ORIGIN=https://47.119.122.133`。受控试玩期间，可设置 `PETDOG_ALLOW_REGISTER=1` 开放注册。
+3. 安装发布包内的 `deploy/petdog-api.service`，核对 `ExecStart` 中的 Node.js 路径。运行 `systemctl daemon-reload` 和 `systemctl enable --now petdog-api.service`。启动时会执行版本化迁移，升级已有数据库前先备份。
+4. 在现有 HTTPS server 块引入 `deploy/petdog-api.nginx.conf` 的内容。运行 `nginx -t`，通过后重载 Nginx。
+5. 检查 `/pet-api/healthz` 是否返回 `{"ok":true}`，再用两个独立会话验证登录同一账号后能看到同一份宠物存档。
+
 ## 4. 后端自动发布流程
 
 后端不能直接套用静态站点安装器。需要新增独立的受控发布器：
@@ -128,7 +136,7 @@ Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理�
 
 新增 API 路由：
 
-- /pet-api/ → http://127.0.0.1:3180/
+- /pet-api/ → http://127.0.0.1:3180，保留原请求路径。
 
 配置要求：
 - 保留原有 Game-Portal、Rift、Tactics、Pinball 和 Our-Little-World 路由。
@@ -173,8 +181,8 @@ Node 服务只监听本机回环地址。Nginx 负责把 /pet-api/ 反向代理�
 以下工作必须在实现阶段完成并在真实 ECS 验证后，才能标记为生产可用：
 
 - [x] 前端 Vite 基础工程与静态发布工作流已提交。
-- [ ] ECS 前端站点首次安装、timer 启用与线上验收。
-- [ ] API 构建、测试和 release 工作流。
+- [x] ECS 前端站点首次安装、timer 启用与线上验收。
+- [x] API 构建、测试和 release 工作流。
 - [ ] ECS API 安装器与受控发布器。
 - [ ] petdog-api.service 和 timer。
 - [ ] Nginx /pet-api/ 反向代理。
