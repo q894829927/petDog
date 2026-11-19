@@ -38,7 +38,8 @@ const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
 type HandPose = "head" | "chin" | "back" | "side" | "fingertips" | "brush";
 const handPose: Record<HandGesture, HandPose> = {
   head: "head", ear: "fingertips", cheek: "fingertips", chin: "chin",
-  chest: "side", back: "back", flank: "side", brush: "brush",
+  chest: "side", back: "back", flank: "side", leg: "side", paw: "fingertips",
+  tailRoot: "fingertips", tail: "fingertips", brush: "brush",
 };
 const thumbCurls: Record<HandPose, number> = { head: 0.105, chin: 0.22, back: 0.105, side: 0.12, fingertips: 0.22, brush: 0.3 };
 const palmContact: Record<HandPose, number> = { head: 0.3, chin: 0, back: 0.82, side: 0.76, fingertips: 0, brush: 0 };

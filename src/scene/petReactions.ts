@@ -19,7 +19,7 @@ function reactionClip(name: string, duration: number, movements: Movement[]) {
     const values: number[] = [];
     for (let i = 0; i <= samples; i++) {
       const t = i / samples;
-      const amplitude = (flicks ? Math.sin(2 * Math.PI * flicks * t) : 1) * arc(t);
+      const amplitude = flicks ? Math.sin(2 * Math.PI * flicks * t) * Math.sin(Math.PI * t) : arc(t);
       rotation.setFromAxisAngle(axis, radians * amplitude).toArray(values, i * 4);
     }
     return new QuaternionKeyframeTrack(`${bone}.quaternion`, times, values);
@@ -49,7 +49,7 @@ function backClip(source: AnimationClip, side: number) {
   return new AnimationClip("Back touch", duration, tracks, AdditiveAnimationBlendMode);
 }
 
-function makeClip({ part, side = "L" }: PetTarget, lookAround: AnimationClip) {
+function makeClip({ part, side = "L", hind }: PetTarget, lookAround: AnimationClip) {
   const direction = side === "L" ? 1 : -1;
   switch (part) {
     case "ear":
@@ -62,6 +62,17 @@ function makeClip({ part, side = "L" }: PetTarget, lookAround: AnimationClip) {
       return backClip(lookAround, direction);
     case "flank":
       return reactionClip(part, 1.22, [["Spine_03", roll, 0.14 * direction], ["Spine_04", roll, -0.08 * direction], ["head", yaw, 0.18 * direction]]);
+    case "leg":
+      return reactionClip(part, 0.96, [["head", pitch, -0.34], ["neck", yaw, 0.17 * direction]]);
+    case "paw": {
+      const leg = `${hind ? "b" : "f"}_${side}`;
+      return reactionClip(part, 0.85, [[`thigh_${leg}`, pitch, hind ? -0.18 : 0.23],
+        [`leg_${leg}`, pitch, hind ? -0.43 : 0.45], [`foot_${leg}`, pitch, hind ? 0.18 : -0.12], ["head", pitch, -0.16]]);
+    }
+    case "tailRoot":
+      return reactionClip(part, 1.14, [["tail_01", yaw, 0.50, 2.5], ["tail_03", yaw, 0.14, 2.5]]);
+    case "tail":
+      return reactionClip(part, 0.82, [["tail_03", roll, -0.32 * direction], ["tail_05", roll, -0.32 * direction]]);
     case "head":
       return reactionClip(part, 1.25, [["head", pitch, -0.19], ["neck", pitch, -0.09]]);
     case "chin":
@@ -75,7 +86,7 @@ export function createPetReactions(mixer: AnimationMixer, lookAround: AnimationC
 
   return {
     play(target: PetTarget) {
-      const key = `${target.part}:${target.side ?? "L"}`;
+      const key = `${target.part}:${target.side ?? "L"}:${target.hind ? "hind" : "front"}`;
       let action = actions.get(key);
       if (!action) {
         action = mixer.clipAction(makeClip(target, lookAround)).setLoop(LoopOnce, 1);

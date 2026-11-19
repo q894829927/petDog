@@ -16,7 +16,7 @@ export function hitPetTarget(
   const { position, skinIndex, skinWeight } = object.geometry.attributes;
   const vertices = [face.a, face.b, face.c];
   let x = 0, y = 0, z = 0;
-  let muzzle = 0, ears = 0, neck = 0, trunk = 0, legs = 0, tail = 0;
+  let head = 0, ears = 0, neck = 0, trunk = 0, legs = 0, paws = 0, tail = 0;
   for (let corner = 0; corner < vertices.length; corner++) {
     const vertex = vertices[corner];
     const portion = barycoord.getComponent(corner);
@@ -28,22 +28,29 @@ export function hitPetTarget(
       if (weight <= 0) continue;
       const { name } = object.skeleton.bones[skinIndex.getComponent(vertex, component)];
       if (name.startsWith("Ear_")) ears += weight;
-      else if (faceBones.test(name)) muzzle += weight;
+      else if (faceBones.test(name)) head += weight;
       else if (name === "neck") neck += weight;
       else if (name.startsWith("Spine_")) trunk += weight;
-      else if (legBones.test(name)) legs += weight;
+      else if (legBones.test(name)) {
+        legs += weight;
+        if (name.startsWith("foot_") || name.startsWith("claws_")) paws += weight;
+      }
       else if (name.startsWith("tail_")) tail += weight;
     }
   }
 
   const side = x >= 0 ? "L" : "R";
   if (ears >= 0.29) return { part: "ear", side };
-  if (muzzle + ears >= 0.5) {
+  if (head + ears >= 0.5) {
     if (y < 0.455 && z > 0.312) return { part: "chin" };
     if (y < 0.526 && (z > 0.314 || Math.abs(x) > 0.053)) return { part: "cheek", side };
     return { part: "head" };
   }
-  if (tail >= 0.5 || (y < 0.315 && (legs > 0.48 || z < 0.12))) return null;
+  if (tail >= 0.5) return { part: z > -0.303 ? "tailRoot" : "tail", side };
+  if (legs >= 0.47 && y < 0.315) {
+    return { part: paws > 0.44 || y < 0.065 ? "paw" : "leg", side, hind: z < 0 };
+  }
+  if (y < 0.315 && z < 0.12) return null;
   if (neck >= 0.45 || (z > 0.148 && y < 0.45)) return { part: "chest", side };
   if (y > 0.425 && trunk + neck > 0.39) return { part: "back", side };
   return { part: "flank", side };

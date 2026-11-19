@@ -75,7 +75,7 @@ type PetStroke = {
 };
 
 function samePetTarget(a: PetTarget, b: PetTarget | undefined) {
-  return a.part === b?.part && a.side === b.side;
+  return a.part === b?.part && a.side === b.side && a.hind === b.hind;
 }
 
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
@@ -483,7 +483,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       const travelX = (touch.screenPoint.x - next.screenPoint.x) * size.width * 0.5;
       const travelY = (touch.screenPoint.y - next.screenPoint.y) * size.height * 0.5;
       if (now - next.since >= petRegionDwell && now - lastPetAt.current >= petReactionCooldown &&
-          Math.hypot(travelX, travelY) >= petRegionTravel) {
+          Math.hypot(travelX, travelY) >= (touch.touch ? 5 : petRegionTravel)) {
         stroke.target = next.target;
         stroke.next = null;
         lastPetAt.current = now;
