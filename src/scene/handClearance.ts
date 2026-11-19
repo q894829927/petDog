@@ -73,11 +73,12 @@ function fillDepth(grid: Float32Array, { indices, vertices }: Surface, bounds: B
   }
 }
 
-export function createHandClearance(hand: Group) {
+export function createHandClearance(hand: Group, comb: Group) {
   const handSurfaces: Surface[] = [];
   hand.traverse((object) => {
     if (object instanceof Mesh) handSurfaces.push(surface(object));
   });
+  const bareHandSurfaces = handSurfaces.filter(({ mesh }) => mesh.parent !== comb);
   let dogSurface: Surface | undefined;
   const handDepth = new Float32Array(gridSize ** 2);
   const dogDepth = new Float32Array(gridSize ** 2);
@@ -102,12 +103,13 @@ export function createHandClearance(hand: Group) {
     up.crossVectors(outward, right);
     plane.makeBasis(right, up, outward).transpose();
     bounds.makeEmpty();
-    for (const skin of handSurfaces) project(skin, bounds);
+    const activeSurfaces = comb.visible ? handSurfaces : bareHandSurfaces;
+    for (const skin of activeSurfaces) project(skin, bounds);
     project(dogSurface);
 
     handDepth.fill(-Infinity);
     dogDepth.fill(-Infinity);
-    for (const skin of handSurfaces) fillDepth(handDepth, skin, bounds, -1);
+    for (const skin of activeSurfaces) fillDepth(handDepth, skin, bounds, -1);
     fillDepth(dogDepth, dogSurface, bounds, 1);
 
     let shift = 0;

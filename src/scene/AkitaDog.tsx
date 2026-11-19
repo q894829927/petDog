@@ -52,6 +52,7 @@ const biteTime = 0.5;
 const petReactionCooldown = 400;
 const petRegionDwell = 90;
 const petRegionTravel = 8;
+const brushStrokeLength = 0.3;
 const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap"];
 
 type FetchTrip = {
@@ -469,11 +470,16 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
       }
     }
 
+    const grooming = tool === "brush" && touch?.pressed && touch.gesture === "brush";
+    if (grooming && clip === "Walk") {
+      rest();
+      return;
+    }
     const activity = roaming.current;
     const ballPosition = toy?.position ?? ballStart;
     if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
     if (clip === "Idle") {
-      if (petting) return;
+      if (petting || grooming) return;
       activity.restTime -= step;
       if (activity.restTime > 0) return;
       const { accountId: owner, pet } = useCloudPet.getState();
@@ -540,6 +546,7 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
   const pointerDown = (event: ThreeEvent<PointerEvent>) => {
     if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
     petStroke.current = null;
+    brushing.current = null;
     const part = hitPetPart(event, head);
     if (!part || (tool === "brush" && part !== "back")) return;
     event.stopPropagation();
@@ -578,11 +585,15 @@ export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; 
     }
 
     const stroke = brushing.current;
-    if (!onBack || !dog.current || stroke?.pointer !== event.pointerId) return;
+    if (stroke?.pointer !== event.pointerId) return;
+    if (!pressed || !onBack || !dog.current) {
+      brushing.current = null;
+      return;
+    }
     const z = dog.current.worldToLocal(event.point.clone()).z;
-    if (Math.abs(z - stroke.startZ) * dogScale < 0.3) return;
+    if ((stroke.startZ - z) * dogScale < brushStrokeLength) return;
     brushing.current = null;
-    trigger("brush");
+    trigger("brush", "back");
   };
 
   const finishPointer = (event: ThreeEvent<PointerEvent>) => {

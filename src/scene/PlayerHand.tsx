@@ -32,10 +32,12 @@ const pitchAxis = new Vector3(1, 0, 0);
 const worldUp = new Vector3(0, 1, 0);
 const palmPad = new Vector3(-0.013, 0.104, -0.016);
 const indexPad = new Vector3(0, 0.023, 0);
+const combToothTip = new Vector3(-0.014, 0.179, -0.074);
+const combToothLength = 0.036;
 const fingerNames = ["index", "middle", "ring", "pinky", "thumb"];
 const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
-const thumbCurls: Record<HandGesture, number> = { head: 0.105, chin: 0.22, back: 0.105, brush: 0.24 };
-const palmContact: Record<HandGesture, number> = { head: 0.3, chin: 0, back: 0.82, brush: 0.26 };
+const thumbCurls: Record<HandGesture, number> = { head: 0.105, chin: 0.22, back: 0.105, brush: 0.3 };
+const palmContact: Record<HandGesture, number> = { head: 0.3, chin: 0, back: 0.82, brush: 0 };
 const contactGrace = 0.11;
 const touchContactGrace = 0.18;
 const reachTime = 0.15;
@@ -54,18 +56,19 @@ function sampleSurface(target: HandContact, triangle: Triangle, point: Vector3, 
   triangle.getNormal(normal);
 }
 
-function handMaterials(group: Group) {
-  const materials: Material[] = [];
+function handMaterials(group: Group, comb: Group) {
+  const skin = new Set<Material>();
+  const tool = new Set<Material>();
   group.traverse((object) => {
     if (!(object instanceof Mesh)) return;
     const slots = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of slots) {
       material.transparent = true;
       material.needsUpdate = true;
-      materials.push(material);
+      (object.parent === comb ? tool : skin).add(material);
     }
   });
-  return materials;
+  return { skin, tool };
 }
 
 function fingerCurl(gesture: HandGesture, finger: number, phase: number, stroke: number) {
@@ -85,6 +88,7 @@ function fingerCurl(gesture: HandGesture, finger: number, phase: number, stroke:
 export function PlayerHand({ contact }: { contact: RefObject<HandContact | null> }) {
   const { scene } = useLoader(GLTFLoader, playerHandUrl);
   const hand = useRef<Group>(null);
+  const comb = useRef<Group>(null);
   const rig = useMemo(() => {
     const tip = scene.getObjectByName("player_hand_tip");
     const index = scene.getObjectByName("index_03_r");
@@ -132,6 +136,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     curl: [...restCurls],
     palmMix: 0,
     chinMix: 0,
+    combMix: 0,
     inputMotion: new Vector2(),
     drag: new Vector2(),
     dragged: false,
@@ -142,13 +147,14 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     missedFor: contactGrace,
     reach: 0,
     clearance: 0,
-    materials: null as Material[] | null,
+    materials: null as ReturnType<typeof handMaterials> | null,
     separate: null as ReturnType<typeof createHandClearance> | null,
   }), []);
 
   useFrame(({ camera, size }, delta) => {
     const group = hand.current;
-    if (!group) return;
+    const toolModel = comb.current;
+    if (!group || !toolModel) return;
     let target = contact.current;
     const { tool, panel, foodOpen } = useGameUI.getState();
     const step = Math.min(delta, 0.05);
@@ -220,7 +226,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.reach = MathUtils.clamp(pose.reach + (reaching ? step / reachTime : -step / retractTime), 0, 1);
     if (pose.reach === 0 || !pose.lastContact) {
       pose.lastContact = null;
-      for (const material of pose.materials ?? []) material.opacity = 0;
+      toolModel.visible = false;
       group.visible = false;
       return;
     }
@@ -252,7 +258,10 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.pressure = MathUtils.damp(pose.pressure, Number(active), active ? 19 : 13, step);
     const { gesture } = pose;
     const chin = gesture === "chin";
-    const alongBack = gesture === "back" || gesture === "brush";
+    const brushing = gesture === "brush";
+    const alongBack = gesture === "back" || brushing;
+    pose.combMix = MathUtils.lerp(pose.combMix, Number(brushing), appearing ? 1 : blend);
+    toolModel.visible = pose.combMix > 0.02;
     const scratchRate = 3.15 + 0.35 * Math.sin(pose.elapsed * 2);
     if (chin) pose.phase = (pose.phase + step * 2 * Math.PI * scratchRate) % (2 * Math.PI);
     const phase = pose.phase;
@@ -266,13 +275,14 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     // Face the palm down over the head and back, and up under the chin.
     pose.view.subVectors(camera.position, pose.point).normalize();
     const pettingBack = gesture === "back";
-    pose.z.copy(pose.normal).multiplyScalar(pettingBack ? 1.15 : chin ? 0.58 : 0.58 + 0.26 * pose.pressure);
-    pose.z.addScaledVector(pose.view, pettingBack ? 0.28 : 0.62);
-    pose.z.addScaledVector(worldUp, chin ? -1.1 : pettingBack ? 0.34 : 0.35 + 0.75 * highTouch).normalize();
-    if (alongBack) {
-      // Reach across the back so the fingers do not point into the curled tail.
-      pose.y.copy(pose.view).negate();
-      pose.y.addScaledVector(pose.forward, pettingBack ? 0.60 : -0.92);
+    pose.z.copy(pose.normal).multiplyScalar(alongBack ? 1.15 : chin ? 0.58 : 0.58 + 0.26 * pose.pressure);
+    pose.z.addScaledVector(pose.view, alongBack ? 0.28 : 0.62);
+    pose.z.addScaledVector(worldUp, chin ? -1.1 : alongBack ? 0.34 : 0.35 + 0.75 * highTouch).normalize();
+    if (brushing) {
+      // Point the teeth across the coat, with the grip following the stroke.
+      pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.43);
+    } else if (pettingBack) {
+      pose.y.copy(pose.view).negate().addScaledVector(pose.forward, 0.60);
     } else {
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.48);
       // Keep the cuff clear of the face when the dog looks straight at the camera.
@@ -285,8 +295,8 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.x.crossVectors(pose.y, pose.z);
     pose.rotation.setFromRotationMatrix(pose.basis.makeBasis(pose.x, pose.y, pose.z));
     pose.strokeDirection.set(pose.drag.x, pose.drag.y, 0).applyQuaternion(camera.quaternion);
-    const restingPitch = chin ? -0.42 : -0.59;
-    const touchingPitch = chin ? -0.35 : alongBack ? (pettingBack ? -0.04 : -0.25) : MathUtils.lerp(-0.47, -0.31, crown);
+    const restingPitch = chin || brushing ? -0.42 : -0.59;
+    const touchingPitch = chin ? -0.35 : alongBack ? (brushing ? -0.1 : -0.04) : MathUtils.lerp(-0.47, -0.31, crown);
     const wristMotion = (chin ? 0.045 * scratch : -0.068 * stroke) * pose.pressure;
     const pitch = MathUtils.lerp(restingPitch, touchingPitch, pose.pressure) + wristMotion - 0.064 * pose.strokeDirection.dot(pose.y);
     const roll = (chin ? 0.022 * scratch : 0.055 * pulse) * pose.pressure - 0.16 * pose.strokeDirection.dot(pose.x);
@@ -305,7 +315,7 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     }
 
     for (let finger = 0; finger < pose.curl.length; finger++) {
-      const curl = MathUtils.lerp(restCurls[finger], fingerCurl(gesture, finger, phase, stroke), pose.pressure);
+      const curl = MathUtils.lerp(restCurls[finger], fingerCurl(gesture, finger, phase, stroke), Math.max(pose.pressure, pose.combMix));
       pose.curl[finger] = MathUtils.lerp(pose.curl[finger], curl, appearing ? 1 : blend);
     }
     for (const { bone, rest, finger, bend } of rig.fingers) {
@@ -326,6 +336,10 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     pose.palmMix = MathUtils.lerp(pose.palmMix, palmWeight * pose.pressure * aligned, blend);
     pose.palmPad.copy(palmPad).applyMatrix4(group.matrixWorld);
     pose.fingertip.lerp(pose.palmPad, pose.palmMix);
+    if (toolModel.visible) {
+      pose.palmPad.copy(combToothTip).applyMatrix4(group.matrixWorld);
+      pose.fingertip.lerp(pose.palmPad, pose.combMix);
+    }
 
     pose.nextOutward.copy(pose.normal).multiplyScalar(0.8).addScaledVector(pose.z, 0.85).addScaledVector(pose.view, 0.18);
     if (pose.point.y < 0.46 && pose.nextOutward.y < 0) {
@@ -343,15 +357,16 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
     group.position.add(pose.goal.sub(pose.fingertip));
     group.updateMatrixWorld(true);
     if (!target) last.dog.updateMatrixWorld(true);
-    pose.separate ??= createHandClearance(group);
+    pose.separate ??= createHandClearance(group, toolModel);
     pose.x.set(1, 0, 0).applyQuaternion(group.quaternion);
     const shift = pose.separate(last.mesh, pose.outward, pose.x);
     pose.clearance = Math.max(shift, MathUtils.damp(pose.clearance, shift, 21, step));
     group.position.addScaledVector(pose.outward, pose.clearance);
 
-    pose.materials ??= handMaterials(group);
+    pose.materials ??= handMaterials(group, toolModel);
     const opacity = MathUtils.smoothstep(pose.reach, 0, 0.72);
-    for (const material of pose.materials) material.opacity = opacity;
+    for (const material of pose.materials.skin) material.opacity = opacity;
+    for (const material of pose.materials.tool) material.opacity = opacity * pose.combMix;
   });
 
   return (
@@ -368,6 +383,22 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
         <cylinderGeometry args={[0.035, 0.036, 0.019, 20]} />
         <meshStandardMaterial color="#677c69" roughness={1} />
       </mesh>
+      <group name="Grooming comb" ref={comb} visible={false}>
+        <mesh position={[-0.014, 0.126, -0.028]} scale={[1, 1, 0.86]}>
+          <cylinderGeometry args={[0.014, 0.019, 0.088, 12]} />
+          <meshStandardMaterial color="#385850" roughness={0.77} />
+        </mesh>
+        <mesh position={[combToothTip.x, combToothTip.y, -0.03]} rotation={[0, 0, Math.PI / 2]}>
+          <capsuleGeometry args={[0.013, 0.116, 3, 12]} />
+          <meshStandardMaterial color="#a9764e" roughness={0.64} />
+        </mesh>
+        {Array.from({ length: 9 }, (_, index) => (
+          <mesh key={index} position={[combToothTip.x + (index - 4) * 0.014, combToothTip.y, combToothTip.z + combToothLength / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.0029, 0.004, combToothLength, 8]} />
+            <meshStandardMaterial color="#d7d4c8" metalness={0.28} roughness={0.42} />
+          </mesh>
+        ))}
+      </group>
     </group>
   );
 }
