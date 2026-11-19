@@ -1,8 +1,9 @@
-import { Suspense, useEffect, useRef, type RefObject } from "react";
+import { Suspense, useEffect, useRef, type PointerEvent, type RefObject } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Vector2, type Mesh, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
+import { PlayerHand, type HandContact } from "./PlayerHand";
 import { ballGroundY, ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
 
 const roomFov = 37;
@@ -157,8 +158,18 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
 export function PetWorld() {
   const highQuality = useGameUI((state) => state.quality === "high");
   const ball = useRef<Mesh>(null);
+  const handContact = useRef<HandContact | null>(null);
+  const releaseHand = (event: PointerEvent<HTMLDivElement>) => {
+    const target = handContact.current;
+    if (target?.pointer !== event.pointerId) return;
+    target.pressed = false;
+    target.visibleUntil = event.pointerType === "mouse" ? Infinity : performance.now() + 320;
+  };
+  const cancelHand = (event: PointerEvent<HTMLDivElement>) => {
+    if (handContact.current?.pointer === event.pointerId) handContact.current = null;
+  };
   return (
-    <div className="world-canvas" aria-label="秋田犬的 3D 宠物房间">
+    <div className="world-canvas" aria-label="秋田犬的 3D 宠物房间" onPointerUp={releaseHand} onPointerCancel={cancelHand}>
       <Canvas
         shadows={highQuality}
         dpr={highQuality ? [1, 1.75] : [1, 1.1]}
@@ -169,7 +180,8 @@ export function PetWorld() {
         <StageCamera />
         <Room shadows={highQuality} ball={ball} />
         <Suspense fallback={null}>
-          <AkitaDog ball={ball} />
+          <AkitaDog ball={ball} handContact={handContact} />
+          <PlayerHand contact={handContact} />
         </Suspense>
       </Canvas>
     </div>

@@ -9,6 +9,7 @@ import {
   Mesh,
   Quaternion,
   QuaternionKeyframeTrack,
+  SkinnedMesh,
   Vector3,
   type AnimationAction,
   type Group,
@@ -20,6 +21,7 @@ import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI, type Interaction, type MealKind, type PetPart } from "../store/useGameUI";
 import { hitPetPart } from "./petTouch";
+import type { HandContact } from "./PlayerHand";
 import {
   ballClearance,
   ballGroundY,
@@ -101,7 +103,7 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
   return fraction === 1;
 }
 
-export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
+export function AkitaDog({ ball, handContact }: { ball: RefObject<Mesh | null>; handContact: RefObject<HandContact | null> }) {
   const quality = useGameUI((state) => state.quality);
   const modelQuality = useDeferredValue(quality);
   const { scene, animations: assetClips } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
@@ -163,6 +165,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
   }, [play]);
 
   useEffect(() => {
+    handContact.current = null;
     scene.traverse((child) => {
       if (child instanceof Mesh) child.castShadow = true;
     });
@@ -192,7 +195,7 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       mixer.stopAllAction();
       currentAction.current = null;
     };
-  }, [mixer, play, rest, scene]);
+  }, [handContact, mixer, play, rest, scene]);
 
   const startInteraction = useCallback((interaction: Interaction, owner: number | null) => {
     const toy = ball.current;
@@ -474,38 +477,69 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
     }
   });
 
-  const reactToClick = (event: ThreeEvent<MouseEvent>) => {
+  const throwOnClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (tool === "ball") {
-      trigger("ball");
-      return;
-    }
-    if (tool === "brush") return;
-
-    const now = performance.now();
-    if (now - lastPetAt.current < 400) return;
-    lastPetAt.current = now;
-    trigger("pet", hitPetPart(event, head) ?? "head");
+    if (tool === "ball") trigger("ball");
   };
 
-  const startBrush = (event: ThreeEvent<PointerEvent>) => {
-    if (tool !== "brush" || !dog.current || hitPetPart(event, head) !== "back") return;
+  const placeHand = (event: ThreeEvent<PointerEvent>, pressed: boolean) => {
+    const { object, face, barycoord } = event;
+    if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return;
+    handContact.current = {
+      dog: dog.current,
+      mesh: object,
+      vertices: [face.a, face.b, face.c],
+      weights: barycoord,
+      pointer: event.pointerId,
+      screenPoint: event.pointer.clone(),
+      pressed,
+      visibleUntil: Infinity,
+    };
+  };
+
+  const pointerDown = (event: ThreeEvent<PointerEvent>) => {
+    if (!event.isPrimary || event.button !== 0 || tool === "ball") return;
+    const part = hitPetPart(event, head);
+    if (tool === "brush" && part !== "back") return;
     event.stopPropagation();
+    placeHand(event, true);
+    if (tool === "pet") {
+      const now = performance.now();
+      if (now - lastPetAt.current < 400) return;
+      lastPetAt.current = now;
+      trigger("pet", part ?? "head");
+      return;
+    }
+    if (!dog.current) return;
     const startZ = dog.current.worldToLocal(event.point.clone()).z;
     brushing.current = { pointer: event.pointerId, startZ };
   };
 
-  const brushBack = (event: ThreeEvent<PointerEvent>) => {
+  const pointerMove = (event: ThreeEvent<PointerEvent>) => {
+    if (!event.isPrimary || tool === "ball") return;
+    const onBack = tool === "brush" && hitPetPart(event, head) === "back";
+    const pressed = (event.buttons & 1) !== 0;
+    const target = handContact.current;
+    const holdingHand = pressed && target?.pointer === event.pointerId;
+    if ((tool === "pet" || onBack || holdingHand) && (event.pointerType === "mouse" || pressed)) {
+      placeHand(event, pressed);
+    } else if (tool === "brush" && !onBack && target?.pointer === event.pointerId) {
+      handContact.current = null;
+    }
     const stroke = brushing.current;
-    if (tool !== "brush" || !dog.current || stroke?.pointer !== event.pointerId || hitPetPart(event, head) !== "back") return;
+    if (!onBack || !dog.current || stroke?.pointer !== event.pointerId) return;
     const z = dog.current.worldToLocal(event.point.clone()).z;
     if (Math.abs(z - stroke.startZ) * dogScale < 0.3) return;
     brushing.current = null;
     trigger("brush");
   };
 
-  const endBrush = (event: ThreeEvent<PointerEvent>) => {
+  const finishPointer = (event: ThreeEvent<PointerEvent>) => {
     if (brushing.current?.pointer === event.pointerId) brushing.current = null;
+    const target = handContact.current;
+    if (target?.pointer === event.pointerId && event.type !== "pointerup" && target.visibleUntil === Infinity) {
+      handContact.current = null;
+    }
   };
 
   return (
@@ -514,12 +548,12 @@ export function AkitaDog({ ball }: { ball: RefObject<Mesh | null> }) {
       position={[0.12, rugSurface, 0.35]}
       rotation={[0, -0.65, 0]}
       scale={dogScale}
-      onClick={reactToClick}
-      onPointerDown={startBrush}
-      onPointerMove={brushBack}
-      onPointerUp={endBrush}
-      onPointerOut={endBrush}
-      onPointerCancel={endBrush}
+      onClick={throwOnClick}
+      onPointerDown={pointerDown}
+      onPointerMove={pointerMove}
+      onPointerUp={finishPointer}
+      onPointerOut={finishPointer}
+      onPointerCancel={finishPointer}
     >
       <primitive object={scene} />
     </group>
