@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import { argon2id, hash, verify } from "argon2";
 import Fastify, { type FastifyRequest } from "fastify";
-import { personalities, petActions, type Personality, type PetActionRequest, type SessionInfo } from "../../../shared/pet.js";
+import { minimumPasswordLength, personalities, petActions, type Personality, type PetActionRequest, type SessionInfo } from "../../../shared/pet.js";
 import { ApiError, openDatabase } from "./database.js";
 
 const sessionName = "petdog_session";
@@ -30,7 +30,7 @@ const credentials = {
   additionalProperties: false,
   properties: {
     email: { type: "string", format: "email", maxLength: 254 },
-    password: { type: "string", minLength: 10, maxLength: 128 },
+    password: { type: "string", minLength: minimumPasswordLength, maxLength: 128 },
   },
 };
 

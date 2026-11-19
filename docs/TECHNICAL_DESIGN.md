@@ -228,7 +228,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 
 ## 10. 身份认证与安全
 
-- 密码使用 Argon2id 哈希，不保存明文密码。
+- 密码至少 6 个字符，支持纯数字密码。密码以 Argon2id 哈希保存。
 - Session 使用密码学安全随机数生成，数据库只保存令牌哈希。
 - Cookie 使用 HttpOnly、Secure、SameSite=Lax。
 - 修改数据的请求校验 Origin，并限制请求来源。

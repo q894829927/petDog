@@ -21,9 +21,9 @@ function sender(app, account) {
   });
 }
 
-async function signIn(app, email, mode = "register") {
+async function signIn(app, email, mode = "register", accountPassword = password) {
   const send = sender(app);
-  const response = await send("POST", "/auth/" + mode, { email, password });
+  const response = await send("POST", "/auth/" + mode, { email, password: accountPassword });
   assert.equal(response.statusCode, mode === "register" ? 201 : 200, response.body);
   const cookieHeader = response.headers["set-cookie"];
   assert.match(cookieHeader, /HttpOnly/);
@@ -72,9 +72,9 @@ test("isolates accounts and applies a retried action once across concurrent devi
   let now = Date.UTC(2026, 10, 19);
   const app = await createApp({ ...options, databasePath: ":memory:", clock: () => now });
   try {
-    const owner = await signIn(app, "owner@example.com");
+    const owner = await signIn(app, "owner@example.com", "register", "012345");
     const other = await signIn(app, "other@example.com");
-    const secondDevice = await signIn(app, "owner@example.com", "login");
+    const secondDevice = await signIn(app, "owner@example.com", "login", "012345");
     const first = sender(app, owner);
     const second = sender(app, secondDevice);
     const stranger = sender(app, other);

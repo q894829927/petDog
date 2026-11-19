@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { personalities, type Personality } from "../../shared/pet";
+import { minimumPasswordLength, personalities, type Personality } from "../../shared/pet";
 import { adoptPet, refreshCloud, renamePet, signIn, signOut, useCloudPet } from "../cloud/useCloudPet";
 
 export const personalityLabel: Record<Personality, string> = {
@@ -45,8 +45,8 @@ export function CloudPanel({ close }: { close: () => void }) {
               <>
                 <label>邮箱<input type="email" name="email" autoComplete="username" required maxLength={254} /></label>
                 <label>密码<input type="password" name="password" autoComplete={mode === "register" ? "new-password" : "current-password"}
-                  required minLength={10} maxLength={128} /></label>
-                {mode === "register" && <p className="cloud-text">密码至少 10 个字符。</p>}
+                  required minLength={minimumPasswordLength} maxLength={128} /></label>
+                {mode === "register" && <p className="cloud-text">密码至少 {minimumPasswordLength} 位，纯数字也可以。</p>}
                 <button type="submit" className="cloud-primary" disabled={busy}>{mode === "register" ? "创建账号" : "登录账号"}</button>
               </>
             ) : (

@@ -1,3 +1,5 @@
+export const minimumPasswordLength = 6;
+
 export const personalities = ["playful", "affectionate", "reserved"] as const;
 export type Personality = typeof personalities[number];
 
