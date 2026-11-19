@@ -131,6 +131,10 @@ export function PlayerHand({ contact }: { contact: RefObject<HandContact | null>
       pose.y.copy(pose.view).negate().addScaledVector(pose.forward, -0.92);
     } else {
       pose.y.copy(pose.forward).negate().addScaledVector(pose.view, -0.48);
+      // Keep the cuff clear of the face when the dog looks straight at the camera.
+      const frontal = MathUtils.smoothstep(pose.forward.dot(pose.view), 0.84, 0.98);
+      pose.x.set(1, 0, 0).applyQuaternion(camera.quaternion);
+      pose.y.addScaledVector(pose.x, frontal * (chin ? 0.85 : 1.3));
       pose.y.addScaledVector(worldUp, (chin ? 0.24 : 0.34) * highTouch);
     }
     pose.y.addScaledVector(pose.z, -pose.y.dot(pose.z)).normalize();
