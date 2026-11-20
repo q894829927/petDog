@@ -479,7 +479,7 @@ export function AkitaDog({ ball, dog, handContact }: {
     const pose = currentAction.current?.getClip().name;
     const contact = handContact.current;
     const ballPhase = ball.current.motion.phase;
-    const canWag = (pose === "Idle" || pose === "Sit" || pose === "Walk") &&
+    const canWag = (pose === "Idle" || pose === "Walk") &&
       !approach.current && !recline.current && !rearReaction.current && ballPhase !== "flight" && ballPhase !== "fetch" &&
       !(contact?.pressed && isTailPart(contact.gesture));
     reactions.updateTail(step, cloud.pet, canWag);
