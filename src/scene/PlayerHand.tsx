@@ -1,7 +1,7 @@
 import { useMemo, useRef, type RefObject } from "react";
 import { useFrame, useLoader } from "@react-three/fiber";
 import {
-  Bone, MathUtils, Matrix4, Mesh, Quaternion, Raycaster, Triangle, Vector2, Vector3,
+  Bone, Euler, MathUtils, Matrix4, Mesh, Quaternion, Raycaster, Triangle, Vector2, Vector3,
   type Group, type Material,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -9,7 +9,7 @@ import playerHandUrl from "../assets/player-hand.glb?url";
 import { useGameUI, type PetPart } from "../store/useGameUI";
 import { createHandClearance } from "./handClearance";
 import { hitPetTarget, samplePetSurface, type PetSurface } from "./petTouch";
-import type { BallState } from "./TennisBall";
+import { ballGripCloseTime, type BallState } from "./TennisBall";
 
 export type HandGesture = PetPart | "brush";
 
@@ -28,13 +28,20 @@ const bendAxis = new Vector3(0, 0, 1);
 const pitchAxis = new Vector3(1, 0, 0);
 const worldUp = new Vector3(0, 1, 0);
 const palmPad = new Vector3(-0.013, 0.104, -0.016);
-const ballGripCenter = new Vector3(-0.013, 0.139, -0.058);
+const ballGripCenter = new Vector3(-0.02233, 0.10959, -0.04808);
 const indexPad = new Vector3(0, 0.023, 0);
 const combToothTip = new Vector3(-0.014, 0.179, -0.074);
 const combToothLength = 0.036;
 const fingerNames = ["index", "middle", "ring", "pinky", "thumb"];
 const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
-const ballGripCurls = [0.62, 0.6, 0.65, 0.69, 0.47];
+// Local joint angles in degrees, from the knuckle to the tip, fitted to the tennis ball.
+const ballGripAngles = [
+  [[-11.5, 9, -19], [0, 0, -28.5], [0, 0, -13.3]], // Index
+  [[-31.5, -16.2, -6.9], [0, 0, -50], [0, 0, -7.9]], // Middle
+  [[-29, -4.6, -11.3], [0, 0, -46.1], [0, 0, 3.2]], // Ring
+  [[-30, 16.6, -29.3], [0, 0, -15.7], [0, 0, 0.1]], // Little
+  [[-2.3, -17.3, 1.1], [7.9, -4.7, -6.9], [0, 0, -12.8]], // Thumb
+];
 type HandPose = "head" | "chin" | "back" | "side" | "fingertips" | "brush" | "point";
 const handPose: Record<HandGesture, HandPose> = {
   head: "head", ear: "fingertips", cheek: "fingertips", chin: "chin",
@@ -93,7 +100,7 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     const tip = scene.getObjectByName("player_hand_tip");
     const index = scene.getObjectByName("index_03_r");
     if (!tip || !index) throw new Error("Player hand fingertip missing");
-    const fingers: { bone: Bone; rest: Quaternion; finger: number; bend: number }[] = [];
+    const fingers: { bone: Bone; rest: Quaternion; finger: number; bend: number; grip: Quaternion }[] = [];
     scene.traverse((child) => {
       if (!(child instanceof Bone)) return;
       const match = /^(index|middle|ring|pinky|thumb)_0([123])_r$/.exec(child.name);
@@ -101,11 +108,14 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       const finger = fingerNames.indexOf(match[1]);
       const joint = Number(match[2]);
       const bend = finger === 4 ? (joint === 1 ? 1 : 0.5) : (joint === 3 ? 0.5 : 1);
-      fingers.push({ bone: child, rest: child.quaternion.clone(), finger, bend });
+      const [x, y, z] = ballGripAngles[finger][joint - 1].map(MathUtils.degToRad);
+      const grip = new Quaternion().setFromEuler(new Euler(x, y, z));
+      fingers.push({ bone: child, rest: child.quaternion.clone(), finger, bend, grip });
     });
-    const bendFingers = (curls: number[], offset: Quaternion) => {
-      for (const { bone, rest, finger, bend } of fingers) {
+    const bendFingers = (curls: number[], offset: Quaternion, gripping: number) => {
+      for (const { bone, rest, finger, bend, grip } of fingers) {
         offset.setFromAxisAngle(bendAxis, -curls[finger] * bend);
+        if (gripping > 0) offset.slerp(grip, gripping);
         bone.quaternion.copy(rest).multiply(offset);
       }
     };
@@ -153,6 +163,7 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     missedFor: contactGrace,
     reach: 0,
     onBall: false,
+    ballGrip: 0,
     clearance: 0,
     materials: null as ReturnType<typeof handMaterials> | null,
     separate: null as ReturnType<typeof createHandClearance> | null,
@@ -177,12 +188,14 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     const { mesh: toy, hovered, motion } = ball.current;
     const holdingBall = motion.phase === "held";
     const toss = motion.phase === "flight" && motion.play && motion.elapsed < 0.26 ? motion : null;
+    const gripTime = holdingBall ? motion.elapsed : toss && toss.elapsed < 0 ? toss.elapsed + ballGripCloseTime : null;
     const ballPoint = disabled || (!holdingBall && !toss && !hovered) ? null : toss?.from ?? toy?.position;
     if (ballPoint || (pose.onBall && !target && !appearing)) {
       if (!pose.onBall) {
         pose.lastContact = null;
         pose.startedAt = null;
         pose.clearance = 0;
+        pose.pressure = 0;
       }
       pose.onBall = true;
       if (ballPoint) {
@@ -199,28 +212,33 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
 
       const followThrough = toss ? MathUtils.smoothstep(toss.elapsed, 0, 0.20) : 0;
       pose.view.subVectors(camera.position, pose.point).normalize();
-      // Approach the ball from above and to the side so the fingers and ball stay readable together.
+      // Bring the wrist in diagonally from the player's right.
       pose.x.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      pose.z.copy(pose.x).multiplyScalar(0.84).addScaledVector(worldUp, 0.45).addScaledVector(pose.view, -0.37).normalize();
-      pose.y.copy(worldUp).negate().addScaledVector(pose.view, -0.36);
+      pose.z.copy(pose.x).multiplyScalar(0.42).addScaledVector(worldUp, 0.68).addScaledVector(pose.view, -0.6).normalize();
+      pose.y.copy(pose.x).multiplyScalar(-0.76).addScaledVector(worldUp, -0.64).addScaledVector(pose.view, -0.31);
       pose.y.addScaledVector(pose.z, -pose.y.dot(pose.z)).normalize();
       pose.x.crossVectors(pose.y, pose.z);
       pose.rotation.setFromRotationMatrix(pose.basis.makeBasis(pose.x, pose.y, pose.z));
       pose.rotation.multiply(pose.offset.setFromAxisAngle(pitchAxis, -0.49 * followThrough));
       group.quaternion.slerp(pose.rotation, appearing ? 1 : blend);
-      pose.pressure = MathUtils.damp(pose.pressure, Number(holdingBall && ballPoint !== null), 22, step);
+      pose.ballGrip = ballPoint && gripTime !== null
+        ? MathUtils.smoothstep(gripTime, 0.015, ballGripCloseTime)
+        : MathUtils.damp(pose.ballGrip, 0, toss ? 33 : 24, step);
       for (let finger = 0; finger < pose.curl.length; finger++) {
-        const open = MathUtils.lerp(restCurls[finger] + 0.1, restCurls[finger], followThrough);
-        const curl = MathUtils.lerp(open, ballGripCurls[finger], pose.pressure);
-        pose.curl[finger] = MathUtils.lerp(pose.curl[finger], curl, appearing ? 1 : blend);
+        const open = restCurls[finger] + 0.07 * (1 - followThrough);
+        pose.curl[finger] = MathUtils.lerp(pose.curl[finger], open, appearing ? 1 : blend);
       }
-      rig.bendFingers(pose.curl, pose.offset);
+      rig.bendFingers(pose.curl, pose.offset, pose.ballGrip);
 
-      pose.goal.copy(pose.point).addScaledVector(pose.z, 0.15 * (1 - pose.pressure) + 0.36 * (1 - pose.reach));
+      const retreat = ballPoint ? 0 : 0.36 * (1 - pose.reach);
+      pose.z.set(0, 0, 1).applyQuaternion(group.quaternion);
+      pose.goal.copy(pose.point).addScaledVector(pose.z, 0.155 * (1 - pose.ballGrip) + retreat);
       if (toss) {
+        const release = Math.max(0, toss.elapsed);
         pose.forward.subVectors(toss.to, toss.from).setY(0).normalize();
         pose.goal.addScaledVector(pose.forward, 0.27 * followThrough);
-        pose.goal.y += 0.28 * followThrough;
+        pose.goal.addScaledVector(pose.z, 0.08 * (1 - pose.ballGrip));
+        pose.goal.y += 0.52 * (1 - Math.exp(-release * 15));
       }
       pose.palmPad.copy(ballGripCenter).multiplyScalar(group.scale.x).applyQuaternion(group.quaternion);
       group.position.copy(pose.goal).sub(pose.palmPad);
@@ -405,7 +423,8 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       const curl = MathUtils.lerp(restCurls[finger], fingerCurl(gesture, finger, phase, stroke), grip);
       pose.curl[finger] = MathUtils.lerp(pose.curl[finger], curl, appearing ? 1 : blend);
     }
-    rig.bendFingers(pose.curl, pose.offset);
+    pose.ballGrip = appearing ? 0 : MathUtils.damp(pose.ballGrip, 0, 24, step);
+    rig.bendFingers(pose.curl, pose.offset, pose.ballGrip);
     rig.tip.getWorldPosition(pose.fingertip);
     const tipWeight = chin ? 0.32 + 0.18 * Math.sin(phase + 0.45) : pointing ? 1 : fingertips ? 0.8 : 0;
     pose.tipMix = MathUtils.lerp(pose.tipMix, tipWeight, appearing ? 1 : blend);

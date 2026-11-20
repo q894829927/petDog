@@ -13,6 +13,7 @@ type BallGrab = {
   offset: Vector2;
   downX: number;
   downY: number;
+  elapsed: number;
 };
 
 type BallFlight = {
@@ -32,6 +33,7 @@ export type BallState = {
 };
 
 const handPlane = new Plane(new Vector3(0, 0, 1), -2.36);
+export const ballGripCloseTime = 0.14;
 
 export function ballFloorPoint({ mesh, motion }: BallState): FloorPoint {
   if (motion.phase === "held") return motion.origin;
@@ -53,7 +55,9 @@ export function TennisBall({ ball, dog }: {
   dog: RefObject<Group | null>;
 }) {
   const { gl, camera, size } = useThree();
-  const { ray, pointer } = useMemo(() => ({ ray: new Raycaster(), pointer: new Vector2() }), []);
+  const { ray, pointer, liftGoal } = useMemo(() => ({
+    ray: new Raycaster(), pointer: new Vector2(), liftGoal: new Vector3(),
+  }), []);
 
   useEffect(() => () => { gl.domElement.style.cursor = ""; }, [gl]);
 
@@ -72,13 +76,16 @@ export function TennisBall({ ball, dog }: {
 
     const step = Math.min(delta, 0.05);
     if (motion.phase === "held") {
-      toy.position.lerp(motion.goal, 1 - Math.exp(-step * 20));
+      motion.elapsed += step;
+      const lift = MathUtils.smoothstep(motion.elapsed, ballGripCloseTime, ballGripCloseTime + 0.12);
+      liftGoal.lerpVectors(motion.origin, motion.goal, lift);
+      toy.position.lerp(liftGoal, 1 - Math.exp(-step * 26));
     } else if (motion.phase === "flight") {
       motion.elapsed += step;
-      const t = Math.min(1, motion.elapsed / motion.duration);
+      const t = MathUtils.clamp(motion.elapsed / motion.duration, 0, 1);
       toy.position.lerpVectors(motion.from, motion.to, MathUtils.smootherstep(t, 0, 1));
       toy.position.y = MathUtils.lerp(motion.from.y, motion.to.y, t) + motion.lift * 4 * t * (1 - t);
-      if (motion.lift > 0) toy.rotation.x += step * 8;
+      if (motion.lift > 0 && t > 0) toy.rotation.x += step * 8;
       if (t === 1) {
         if (motion.play?.sequence === (ui.interaction?.sequence ?? 0)) {
           state.motion = { phase: "fetch", owner: motion.play.owner };
@@ -111,6 +118,7 @@ export function TennisBall({ ball, dog }: {
       offset: new Vector2(center.x, center.y).sub(event.pointer),
       downX: event.clientX,
       downY: event.clientY,
+      elapsed: 0,
     };
     (event.target as Element).setPointerCapture(event.pointerId);
     moveHeldBall(event, grab);
@@ -166,7 +174,8 @@ export function TennisBall({ ball, dog }: {
       to: new Vector3(landing.x, ballGroundY, landing.z),
       lift: MathUtils.lerp(1.66, 2.14, power),
       duration: MathUtils.lerp(0.76, 1.13, power),
-      elapsed: 0,
+      // A quick flick still gives the hand time to close before the ball leaves.
+      elapsed: Math.min(0, grab.elapsed - ballGripCloseTime),
       play: { sequence: ui.interaction?.sequence ?? 0, owner: useCloudPet.getState().accountId },
     };
     ui.setNotice("球抛出去了！");
