@@ -1,30 +1,70 @@
 import {
-  AdditiveAnimationBlendMode, AnimationClip, LoopOnce, Quaternion, QuaternionKeyframeTrack, Vector3,
+  AdditiveAnimationBlendMode, AnimationClip, LoopOnce, MathUtils, Quaternion, QuaternionKeyframeTrack, Vector3,
   type AnimationAction, type AnimationMixer,
 } from "three";
 import type { PetTarget } from "../store/useGameUI";
+import type { Personality, PetSnapshot } from "../../shared/pet";
 
 const pitch = new Vector3(1, 0, 0);
 const yaw = new Vector3(0, 1, 0);
 const roll = new Vector3(0, 0, 1);
 const arc = (t: number) => Math.sin(Math.PI * t) ** 2;
 
-type Movement = [bone: string, axis: Vector3, radians: number, flicks?: number];
+type Movement = [bone: string, axis: Vector3, radians: number, flicks?: number, phase?: number];
 
 function reactionClip(name: string, duration: number, movements: Movement[]) {
   const rotation = new Quaternion();
   const samples = 24;
   const times = Array.from({ length: samples + 1 }, (_, i) => duration * i / samples);
-  const tracks = movements.map(([bone, axis, radians, flicks]) => {
+  const tracks = movements.map(([bone, axis, radians, flicks, phase = 0]) => {
     const values: number[] = [];
     for (let i = 0; i <= samples; i++) {
       const t = i / samples;
-      const amplitude = flicks ? Math.sin(2 * Math.PI * flicks * t) * Math.sin(Math.PI * t) : arc(t);
+      const amplitude = flicks ? Math.sin(2 * Math.PI * flicks * t - phase) * Math.sin(Math.PI * t) : arc(t);
       rotation.setFromAxisAngle(axis, radians * amplitude).toArray(values, i * 4);
     }
     return new QuaternionKeyframeTrack(`${bone}.quaternion`, times, values);
   });
   return new AnimationClip(name, duration, tracks, AdditiveAnimationBlendMode);
+}
+
+export function isTailPart(part: string | undefined) {
+  return part === "tailRoot" || part === "tail" || part === "rear";
+}
+
+type TailMood = Pick<PetSnapshot, "happiness" | "personality" | "sleeping">;
+const happyThreshold = 65;
+const wagPace: Record<Personality, number> = { playful: 1.16, affectionate: 1, reserved: 0.79 };
+
+function createHappyTailWag(mixer: AnimationMixer) {
+  // Express the dog's front-to-back axis in the local bases of the curled tail bones.
+  const swingAxis = new Vector3(0, 0.86, 0.5).normalize();
+  const followAxis = new Vector3(0.2, 0.02, -0.98).normalize();
+  const wags = [2, 3].map((beats) => mixer.clipAction(reactionClip(`Tail wag ${beats}`, 1.6, [
+    ["tail_01", swingAxis, 0.44, beats], ["tail_03", followAxis, 0.11, beats, 0.72],
+  ])).setLoop(LoopOnce, 1));
+  let active: AnimationAction | null = null;
+  let wait = MathUtils.randFloat(0.55, 1.15);
+
+  return (step: number, pet: TailMood | null, allowed: boolean) => {
+    const happiness = pet?.happiness ?? 78;
+    if (!allowed || happiness < happyThreshold || pet?.sleeping) {
+      active?.fadeOut(0.18);
+      active = null;
+      return;
+    }
+    if (active?.isRunning()) return;
+
+    const mood = MathUtils.smoothstep(happiness, happyThreshold, 100);
+    wait -= step * MathUtils.lerp(0.62, 1.4, mood) * wagPace[pet?.personality ?? "playful"];
+    if (wait > 0) return;
+
+    const variation = MathUtils.randInt(0, wags.length - 1);
+    const duration = MathUtils.randFloat(1.18, 1.64) + variation * 0.22;
+    const strength = MathUtils.randFloat(0.62, 0.98) * MathUtils.lerp(0.82, 1, mood);
+    active = wags[variation].reset().setDuration(duration).setEffectiveWeight(strength).fadeIn(0.12).play();
+    wait = MathUtils.randFloat(3.7, 7.6);
+  };
 }
 
 function backClip(source: AnimationClip, side: number) {
@@ -87,9 +127,14 @@ function makeClip({ part, side = "L", hind }: PetTarget, lookAround: AnimationCl
 
 export function createPetReactions(mixer: AnimationMixer, lookAround: AnimationClip) {
   const actions = new Map<string, AnimationAction>();
+  const wag = createHappyTailWag(mixer);
   let current: AnimationAction | null = null;
 
   return {
+    updateTail(step: number, pet: TailMood | null, allowed: boolean) {
+      const tailInUse = current?.isRunning() && isTailPart(current.getClip().name);
+      wag(step, pet, allowed && !tailInUse);
+    },
     play(target: PetTarget) {
       const key = `${target.part}:${target.side ?? "L"}:${target.hind ? "hind" : "front"}`;
       let action = actions.get(key);

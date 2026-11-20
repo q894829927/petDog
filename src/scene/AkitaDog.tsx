@@ -20,7 +20,7 @@ import akitaHighUrl from "../assets/akita-high.glb?url";
 import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
-import { createPetReactions } from "./petReactions";
+import { createPetReactions, isTailPart } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
@@ -475,6 +475,14 @@ export function AkitaDog({ ball, dog, handContact }: {
 
   useFrame(({ camera, size }, delta) => {
     const step = Math.min(delta, 0.1);
+    const cloud = useCloudPet.getState();
+    const pose = currentAction.current?.getClip().name;
+    const contact = handContact.current;
+    const ballPhase = ball.current.motion.phase;
+    const canWag = (pose === "Idle" || pose === "Sit" || pose === "Walk") &&
+      !approach.current && !recline.current && !rearReaction.current && ballPhase !== "flight" && ballPhase !== "fetch" &&
+      !(contact?.pressed && isTailPart(contact.gesture));
+    reactions.updateTail(step, cloud.pet, canWag);
     mixer.update(step);
 
     const group = dog.current;
@@ -639,7 +647,7 @@ export function AkitaDog({ ball, dog, handContact }: {
       if (petting || grooming) return;
       activity.restTime -= step;
       if (activity.restTime > 0) return;
-      const { accountId: owner, pet } = useCloudPet.getState();
+      const { accountId: owner, pet } = cloud;
       const napAfter = pet?.sleeping ? 0 : pet && pet.energy < 25 ? 8 : activity.napAfter;
       if (activity.activeTime >= napAfter) {
         activity.activeTime = 0;
