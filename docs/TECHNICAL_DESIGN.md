@@ -72,7 +72,7 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - PetAnimator：动画状态与动画混合。
 - PetNavigation：房间内有限区域移动。
 - InteractionRaycaster：鼠标与触摸命中检测。
-- CameraController：固定观察视角和有限镜头调整。
+- StageCamera：近场取景随团子缓慢移动。远抛时根据团子和球的位置平滑拓宽取景，追球结束回到近场。手势按住期间保持机位。
 
 ### 4.2 宠物行为表现
 

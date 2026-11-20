@@ -523,7 +523,7 @@ export function AkitaDog({ ball, dog, handContact }: {
       const target = visit.route[visit.waypoint];
       const heading = target ? headingTo(group.position, target) : visit.heading;
       if (kind === "call" && action.getClip().name === "LookAround" && action.time < 0.55) {
-        face(group, headingTo(group.position, { x: 0, z: camera.position.z }), turnSpeed * step);
+        face(group, headingTo(group.position, camera.position), turnSpeed * step);
         return;
       }
       if (target) {

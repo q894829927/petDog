@@ -1,13 +1,13 @@
 import { Suspense, useCallback, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { Canvas, events, useThree, type RootStore } from "@react-three/fiber";
-import { SkinnedMesh, Vector3, type Group, type PerspectiveCamera } from "three";
+import { Canvas, events, useFrame, useThree, type RootStore } from "@react-three/fiber";
+import { MathUtils, SkinnedMesh, Vector3, type Group, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
 import { LivingRoom } from "./LivingRoom";
 import { PlayerHand, type HandContact } from "./PlayerHand";
-import { cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
+import { ballFloorPoint, cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
 import { createNearbyTouchPicker } from "./petTouch";
-import { ballStart } from "./roomNavigation";
+import { ballStart, dogHome } from "./roomNavigation";
 
 const roomFov = 37;
 function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject<Group | null>) {
@@ -53,16 +53,66 @@ function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject
   return manager;
 }
 
-function StageCamera() {
+function StageCamera({ ball, dog, contact }: {
+  ball: RefObject<BallState>;
+  dog: RefObject<Group | null>;
+  contact: RefObject<HandContact | null>;
+}) {
   const { camera, size } = useThree();
+  const portrait = size.width < 640 && size.width < size.height;
+  const aspect = size.width / size.height;
+  const distance = Math.max(7.45, (portrait ? 5.45 : 5.3) / aspect);
+  const eyeHeight = portrait ? 2.65 : 2.48;
+  const focus = useRef(new Vector3(0.12, 1.04, 0.68));
+  const wideShot = useRef(false);
+
   useEffect(() => {
-    const perspective = camera as PerspectiveCamera;
-    const portrait = size.width < 640 && size.width < size.height;
-    const distance = Math.max(7.45, (portrait ? 5.45 : 5.3) * size.height / size.width);
-    perspective.position.set(0.12, portrait ? 2.65 : 2.48, distance + 0.42);
-    perspective.lookAt(0.12, 1.04, 0.68);
-    perspective.updateProjectionMatrix();
-  }, [camera, size.width, size.height]);
+    focus.current.set(0.12, 1.04, 0.68);
+    camera.position.set(0.12, eyeHeight, distance + 0.42);
+    camera.lookAt(focus.current);
+    (camera as PerspectiveCamera).updateProjectionMatrix();
+    camera.updateMatrixWorld();
+  }, [camera, distance, eyeHeight]);
+
+  useFrame((_, delta) => {
+    const sceneBall = ball.current;
+    const { motion } = sceneBall;
+    if (motion.phase === "held" || contact.current?.pressed) return;
+
+    const pet = dog.current?.position ?? dogHome;
+    const offsetX = pet.x - 0.12;
+    let x = 0.12 + Math.sign(offsetX) * Math.max(0, Math.abs(offsetX) - (portrait ? 0.45 : 1.05));
+    let depth = MathUtils.clamp((pet.z + 1.55) * 0.56, -1.95, 0);
+    let height = eyeHeight;
+    let eyeZ = distance + 0.42 + depth;
+    let lookY = 1.04;
+
+    if (motion.phase === "flight" && motion.play) {
+      wideShot.current = motion.to.z < -2.15 || Math.abs(motion.to.x - pet.x) > (portrait ? 2.05 : 3.25);
+    } else if (motion.phase !== "fetch") {
+      wideShot.current = false;
+    }
+    if (wideShot.current) {
+      const target = ballFloorPoint(sceneBall);
+      x = (pet.x + target.x) / 2;
+      depth = MathUtils.clamp(Math.min(pet.z, target.z) * 0.36, -1.66, 0);
+      height += 1.22;
+      lookY = 1.22;
+      const halfWidth = Math.abs(pet.x - target.x) / 2 + 1.46;
+      const widthPerDepth = Math.tan(MathUtils.degToRad(roomFov / 2)) * aspect;
+      eyeZ = Math.max(distance + 2.65 + depth, Math.max(pet.z, target.z) + halfWidth / widthPerDepth);
+    }
+
+    const step = Math.min(delta, 0.05);
+    const ease = 3.8;
+    const position = camera.position;
+    const aim = focus.current;
+    position.set(MathUtils.damp(position.x, x, ease, step), MathUtils.damp(position.y, height, ease, step),
+      MathUtils.damp(position.z, eyeZ, ease, step));
+    aim.set(position.x, MathUtils.damp(aim.y, lookY, ease, step), MathUtils.damp(aim.z, 0.68 + depth, ease, step));
+    camera.lookAt(aim);
+    camera.updateMatrixWorld();
+  }, -2);
   return null;
 }
 
@@ -101,7 +151,7 @@ export function PetWorld() {
         gl={{ antialias: highQuality, powerPreference: "high-performance" }}
         fallback={<div className="webgl-fallback">当前设备无法加载 3D 场景，请尝试其他浏览器。</div>}
       >
-        <StageCamera />
+        <StageCamera ball={ball} dog={dog} contact={handContact} />
         <LivingRoom shadows={highQuality} />
         <TennisBall ball={ball} dog={dog} />
         <Suspense fallback={null}>

@@ -110,12 +110,13 @@ export function TennisBall({ ball, dog }: {
     event.stopPropagation();
     const toy = event.object as Mesh;
     const center = toy.position.clone().project(camera);
+    const reachZ = MathUtils.clamp(toy.position.z + 0.55, ballStart.z + 1.4, roomBounds.maxZ - 0.3);
     const grab: BallGrab = {
       phase: "held",
       pointer: event.pointerId,
       origin: toy.position.clone(),
       goal: toy.position.clone(),
-      plane: new Plane(new Vector3(0, 0, 1), -Math.min(roomBounds.maxZ - 0.3, Math.max(ballStart.z + 1.4, toy.position.z + 0.55))),
+      plane: new Plane(new Vector3(0, 0, 1), -reachZ),
       offset: new Vector2(center.x, center.y).sub(event.pointer),
       downX: event.clientX,
       downY: event.clientY,
