@@ -1,14 +1,18 @@
-import { useMemo } from "react";
-import { Shape, Vector2 } from "three";
+import { useLayoutEffect, useMemo } from "react";
+import { useLoader } from "@react-three/fiber";
+import { RepeatWrapping, Shape, SRGBColorSpace, TextureLoader, Vector2, type Texture } from "three";
+import floorColorUrl from "../assets/living-room-floor.webp?url";
+import floorNormalUrl from "../assets/living-room-floor-normal.webp?url";
+import windowViewUrl from "../assets/living-room-view.webp?url";
 import { useGameUI } from "../store/useGameUI";
 import { dogBed, floorSurface, foodBowl, roomBounds, rug, windowPlant } from "./roomNavigation";
 
 const width = roomBounds.maxX - roomBounds.minX;
 const depth = roomBounds.maxZ - roomBounds.minZ;
-const wallHeight = 4.25;
+const wallHeight = 6.25;
 const windowOpening = { left: -2.12, right: 4.95, bottom: 0.48, top: 3.63 };
 const plaster = "#ece4d4";
-const trim = "#c8a77b";
+const trim = "#b79b77";
 const bowlProfile = [
   [0, 0.024], [0.26, 0.024], [0.32, 0.11], [0.31, 0.116],
   [0.29, 0.11], [0.246, 0.047], [0, 0.047],
@@ -90,7 +94,7 @@ function FoodBowl() {
   );
 }
 
-function PictureWindow() {
+function PictureWindow({ view }: { view: Texture }) {
   const { left, right, bottom, top } = windowOpening;
   const x = (left + right) / 2;
   const y = (bottom + top) / 2;
@@ -104,15 +108,14 @@ function PictureWindow() {
       <RoomBox position={[x, bottom / 2, z]} size={[w, bottom, 0.2]} color={plaster} />
       <RoomBox position={[x, (top + wallHeight) / 2, z]} size={[w, wallHeight - top, 0.2]} color={plaster} />
       <mesh position={[x, y, z - 0.19]}>
-        <planeGeometry args={[w + 0.18, h + 0.18]} />
-        <meshBasicMaterial color="#d4e4d7" />
+        <planeGeometry args={[w + 0.6, h + 0.44]} />
+        <meshBasicMaterial map={view} toneMapped={false} />
       </mesh>
       {[left, left + w / 3, right - w / 3, right].map((divider) => (
         <RoomBox key={divider} position={[divider, y, z + 0.02]} size={[0.095, h, 0.23]} color={trim} />
       ))}
-      {[bottom, top].map((rail) => (
-        <RoomBox key={rail} position={[x, rail, z + 0.04]} size={[w + 0.1, 0.1, 0.28]} color={trim} />
-      ))}
+      <RoomBox position={[x, top, z + 0.04]} size={[w + 0.1, 0.1, 0.28]} color={trim} />
+      <RoomBox position={[x, bottom, z + 0.12]} size={[w + 0.26, 0.11, 0.48]} color={trim} />
     </group>
   );
 }
@@ -144,6 +147,20 @@ function WindowPlant() {
 
 export function LivingRoom({ shadows }: { shadows: boolean }) {
   const centerZ = (roomBounds.minZ + roomBounds.maxZ) / 2;
+  const [floorColor, floorNormal, view] = useLoader(TextureLoader, [floorColorUrl, floorNormalUrl, windowViewUrl]);
+  useLayoutEffect(() => {
+    floorColor.colorSpace = SRGBColorSpace;
+    view.colorSpace = SRGBColorSpace;
+    view.needsUpdate = true;
+    for (const texture of [floorColor, floorNormal]) {
+      texture.wrapS = RepeatWrapping;
+      texture.wrapT = RepeatWrapping;
+      texture.repeat.set(2.2, 2.2 * (depth + 4) / width);
+      texture.anisotropy = shadows ? 8 : 2;
+      texture.needsUpdate = true;
+    }
+  }, [floorColor, floorNormal, view, shadows]);
+
   return (
     <>
       <color attach="background" args={["#e8dcc9"]} />
@@ -156,12 +173,13 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
       <group name="Living room">
         <mesh name="Wood floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorSurface, centerZ + 2]}>
           <planeGeometry args={[width, depth + 4]} />
-          <meshStandardMaterial color="#d4b58d" roughness={0.84} />
+          <meshStandardMaterial color="#dbe0eb" map={floorColor} normalMap={shadows ? floorNormal : null}
+            normalScale={[0.37, 0.37]} roughness={0.8} />
         </mesh>
         <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color="#e2d7c4" />
         <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color={plaster} />
         <RoomBox position={[0, 0.1, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
-        <PictureWindow />
+        <PictureWindow view={view} />
         <WindowPlant />
         <InteractionRug />
         <FoodBowl />

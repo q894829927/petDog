@@ -152,7 +152,9 @@ export function PetWorld() {
         fallback={<div className="webgl-fallback">当前设备无法加载 3D 场景，请尝试其他浏览器。</div>}
       >
         <StageCamera ball={ball} dog={dog} contact={handContact} />
-        <LivingRoom shadows={highQuality} />
+        <Suspense fallback={null}>
+          <LivingRoom shadows={highQuality} />
+        </Suspense>
         <TennisBall ball={ball} dog={dog} />
         <Suspense fallback={null}>
           <AkitaDog ball={ball} dog={dog} handContact={handContact} />

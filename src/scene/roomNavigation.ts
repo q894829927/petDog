@@ -4,7 +4,7 @@ export const roomBounds = { minX: -6, maxX: 6, minZ: -6.2, maxZ: 3.8 };
 export const floorSurface = 0.026;
 export const rug = { x: 0, z: 1.26, width: 4.85, depth: 2.85 };
 export const dogHome = { x: -0.36, z: 0.72 };
-export const foodBowl = { x: -3.75, z: 1.63, radius: 0.37 };
+export const foodBowl = { x: -3.15, z: 0.47, radius: 0.37 };
 export const dogBed = { x: 3.93, z: -3.67, radius: 0.93 };
 export const windowPlant = { x: 5, z: -5.05, radius: 0.45 };
 export const ballStart = { x: 1.26, z: 1.67, radius: 0.13 };
@@ -67,7 +67,7 @@ function routeTo(start: FloorPoint, destination: FloorPoint, dogRadius: number, 
 export type WalkPlan = { route: FloorPoint[]; heading: number };
 
 export function planMeal(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
-  // Approach the shallow bowl between the front paws, from the center of the rug.
+  // Approach from the open floor, then bring the shallow bowl between the front paws.
   for (const heading of [-Math.PI / 2, -1.25]) {
     const point = (reach: number) => ({
       x: foodBowl.x - Math.sin(heading) * reach,

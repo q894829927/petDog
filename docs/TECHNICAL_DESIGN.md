@@ -74,6 +74,11 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - InteractionRaycaster：鼠标与触摸命中检测。
 - StageCamera：近场取景随团子缓慢移动。远抛时根据团子和球的位置平滑拓宽取景，追球结束回到近场。手势按住期间保持机位。
 
+客厅的墙、窗框、地毯、碗和狗窝由场景几何构成。地板和窗景贴图随静态包发布，三个 WebP 合计约 102 KB。
+
+- 浅木地板采用 ambientCG 的 Wood Floor 066 A。基色贴图为 1024×1024，法线贴图为 512×512，高画质启用地板法线。 [资产](https://ambientcg.com/view?id=WoodFloor066A) · [CC0](https://docs.ambientcg.com/license/)
+- 窗外取自 Andreas Mischok 在 Poly Haven 发布的 Greenwich Park 02，从 1K HDRI 投影为 960×448 的窗景。 [资产](https://polyhaven.com/a/greenwich_park_02) · [CC0](https://polyhaven.com/license)
+
 ### 4.2 宠物行为表现
 
 前端负责把服务端状态和当前交互转化为实时画面：
