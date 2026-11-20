@@ -94,6 +94,22 @@ function samePetTarget(a: PetTarget, b: PetTarget | undefined) {
   return a.part === b?.part && a.side === b.side && a.hind === b.hind;
 }
 
+function createIdleGrounding(mesh: SkinnedMesh) {
+  const positions = mesh.geometry.attributes.position;
+  const soles: number[] = [];
+  // Sample the sole vertices near the floor in the Akita bind pose.
+  for (let index = 0; index < positions.count; index++) {
+    if (positions.getY(index) <= 0.004) soles.push(index);
+  }
+  const vertex = new Vector3();
+  return (body: Group) => {
+    body.updateMatrixWorld(true);
+    let lowest = Infinity;
+    for (const index of soles) lowest = Math.min(lowest, mesh.getVertexPosition(index, vertex).y);
+    return MathUtils.clamp(-lowest, -0.009, 0.009);
+  };
+}
+
 function touchClip(idle: AnimationClip, name: string, bone: string, axis: Vector3, angleAt: (phase: number) => number) {
   const clip = AnimationUtils.subclip(idle, name, 0, 39, 24);
   const trackIndex = clip.tracks.findIndex(({ name }) => name === bone + ".quaternion");
@@ -166,6 +182,7 @@ export function AkitaDog({ ball, dog, handContact }: {
     return mesh;
   }, [scene]);
   const rig = useRef<Group>(null);
+  const idleHeight = useMemo(() => createIdleGrounding(skin), [skin]);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
@@ -467,6 +484,11 @@ export function AkitaDog({ ball, dog, handContact }: {
 
     const toy = ball.current.mesh;
     const clip = action.getClip().name;
+    const body = rig.current;
+    if (body && !recline.current) {
+      const height = clip === "Idle" ? idleHeight(body) : 0;
+      body.position.y = MathUtils.damp(body.position.y, height, 34, step);
+    }
     const cue = rearReaction.current;
     if (cue?.phase === "contact") {
       cue.time -= step;

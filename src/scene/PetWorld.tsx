@@ -3,6 +3,7 @@ import { Canvas, events, useFrame, useThree, type RootStore } from "@react-three
 import { MathUtils, SkinnedMesh, Vector3, type Group, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
+import { GroundContactShadows } from "./GroundContactShadows";
 import { LivingRoom } from "./LivingRoom";
 import { PlayerHand, type HandContact } from "./PlayerHand";
 import { ballFloorPoint, cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
@@ -154,6 +155,7 @@ export function PetWorld() {
         <StageCamera ball={ball} dog={dog} contact={handContact} />
         <Suspense fallback={null}>
           <LivingRoom shadows={highQuality} />
+          <GroundContactShadows ball={ball} dog={dog} />
         </Suspense>
         <TennisBall ball={ball} dog={dog} />
         <Suspense fallback={null}>

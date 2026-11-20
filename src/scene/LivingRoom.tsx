@@ -14,7 +14,7 @@ const windowOpening = { left: -2.12, right: 4.95, bottom: 0.48, top: 3.63 };
 const plaster = "#ece4d4";
 const trim = "#b79b77";
 const bowlProfile = [
-  [0, 0.024], [0.26, 0.024], [0.32, 0.11], [0.31, 0.116],
+  [0, 0], [0.26, 0], [0.32, 0.11], [0.31, 0.116],
   [0.29, 0.11], [0.246, 0.047], [0, 0.047],
 ].map(([x, y]) => new Vector2(x, y));
 
@@ -52,15 +52,16 @@ function InteractionRug() {
     border: roundedMat(rug.width, rug.depth, 0.44),
     center: roundedMat(rug.width - 0.18, rug.depth - 0.18, 0.34),
   }), []);
+  // The material offsets draw the rug above the wood without moving the shared floor surface.
   return (
     <group name="Interaction rug" position={[rug.x, floorSurface, rug.z]} rotation={[-Math.PI / 2, 0, 0]}>
-      <mesh position-z={0.003} receiveShadow>
+      <mesh receiveShadow>
         <shapeGeometry args={[border, 10]} />
-        <meshStandardMaterial color="#bd9f78" roughness={1} />
+        <meshStandardMaterial color="#bd9f78" roughness={1} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </mesh>
-      <mesh position-z={0.005} receiveShadow>
+      <mesh receiveShadow>
         <shapeGeometry args={[center, 10]} />
-        <meshStandardMaterial color="#e4ceae" roughness={1} />
+        <meshStandardMaterial color="#e4ceae" roughness={1} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
       </mesh>
     </group>
   );
@@ -168,7 +169,7 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
       <directionalLight position={[3.8, 7.5, -4.5]} intensity={2.32} color="#fff0d2"
         castShadow={shadows} shadow-mapSize-width={1024} shadow-mapSize-height={1024}
         shadow-camera-left={-8.1} shadow-camera-right={8.1} shadow-camera-top={8.1} shadow-camera-bottom={-8.1}
-        shadow-normalBias={0.035} />
+        shadow-camera-far={19} shadow-bias={-0.00015} shadow-normalBias={0.006} shadow-intensity={0.92} />
       <directionalLight position={[-2.9, 4.2, 6]} intensity={0.85} color="#fff7ed" />
       <group name="Living room">
         <mesh name="Wood floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorSurface, centerZ + 2]}>
@@ -178,18 +179,18 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
         </mesh>
         <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color="#e2d7c4" />
         <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color={plaster} />
-        <RoomBox position={[0, 0.1, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
+        <RoomBox position={[0, floorSurface + 0.065, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
         <PictureWindow view={view} />
         <WindowPlant />
         <InteractionRug />
         <FoodBowl />
         <group name="Dog bed" position={[dogBed.x, floorSurface, dogBed.z]}>
-          <mesh position-y={0.17} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
+          <mesh position-y={0.16} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
             <torusGeometry args={[dogBed.radius - 0.19, 0.19, 16, 56]} />
             <meshStandardMaterial color="#9e7e6e" roughness={0.98} />
           </mesh>
-          <mesh position-y={0.055} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <circleGeometry args={[dogBed.radius - 0.14, 48]} />
+          <mesh position-y={0.0275} castShadow receiveShadow>
+            <cylinderGeometry args={[dogBed.radius - 0.14, dogBed.radius - 0.14, 0.055, 48]} />
             <meshStandardMaterial color="#d7bc9f" roughness={1} />
           </mesh>
         </group>
