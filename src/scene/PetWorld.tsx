@@ -1,11 +1,12 @@
-import { Suspense, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { Canvas, events, useThree, type RootStore, type ThreeEvent } from "@react-three/fiber";
-import { SkinnedMesh, Vector2, type Mesh, type PerspectiveCamera } from "three";
+import { Suspense, useCallback, useEffect, useRef, type PointerEvent, type RefObject } from "react";
+import { Canvas, events, useThree, type RootStore } from "@react-three/fiber";
+import { SkinnedMesh, Vector2, Vector3, type Group, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
 import { PlayerHand, type HandContact } from "./PlayerHand";
+import { cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
 import { createNearbyTouchPicker } from "./petTouch";
-import { ballGroundY, ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
+import { ballStart, dogBed, foodBowl, rug } from "./roomNavigation";
 
 const roomFov = 37;
 const bowlProfile = [
@@ -13,22 +14,41 @@ const bowlProfile = [
   [0.29, 0.11], [0.246, 0.047], [0, 0.047],
 ].map(([x, y]) => new Vector2(x, y));
 
-function roomEvents(store: RootStore) {
+function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject<Group | null>) {
   const base = events(store);
   const pickNearby = createNearbyTouchPicker();
-  let allowNearby = false;
+  const ballCenter = new Vector3();
+  const ballEdge = new Vector3();
+  let pointerEvent: globalThis.PointerEvent | null = null;
   const manager: ReturnType<typeof events> = {
     ...base,
     compute(event, state) {
       base.compute?.(event, state);
-      allowNearby = "pointerType" in event && event.pointerType === "touch" && event.isPrimary &&
-        (event.type === "pointerdown" || (event.type === "pointermove" && (event.buttons & 1) !== 0));
+      pointerEvent = "pointerType" in event ? event : null;
     },
-    filter(hits, { scene, camera, pointer, size }) {
-      if (!allowNearby) return hits;
-      const { tool, panel, foodOpen } = useGameUI.getState();
-      if ((tool !== "pet" && tool !== "brush") || panel || foodOpen || hits.some(({ object }) => object instanceof SkinnedMesh)) return hits;
-      const mesh = scene.getObjectByName("Akita")?.getObjectByProperty("isSkinnedMesh", true);
+    filter(hits, { camera, pointer, size }) {
+      const { mesh: toy, motion } = ball.current;
+      if (motion.phase === "held") return hits.filter(({ object }) => object === toy);
+      if (motion.phase !== "rest") hits = hits.filter(({ object }) => object !== toy);
+      const { panel, foodOpen } = useGameUI.getState();
+      const event = pointerEvent;
+      if (!event?.isPrimary || panel || foodOpen ||
+          (event.type !== "pointerdown" && event.type !== "pointermove") ||
+          hits.some(({ object }) => object instanceof SkinnedMesh || object === toy)) return hits;
+
+      if (toy && motion.phase === "rest" && (event.type === "pointerdown" || event.buttons === 0)) {
+        // Leave a small margin around the visible ball without overriding a direct hit on the dog.
+        ballCenter.copy(toy.position).project(camera);
+        ballEdge.set(1, 0, 0).applyQuaternion(camera.quaternion).multiplyScalar(ballStart.radius).add(toy.position).project(camera);
+        const radius = Math.abs(ballEdge.x - ballCenter.x) * size.width / 2;
+        const distance = Math.hypot((pointer.x - ballCenter.x) * size.width / 2, (pointer.y - ballCenter.y) * size.height / 2);
+        if (distance <= radius + (event.pointerType === "touch" ? 12 : 8)) {
+          return [{ object: toy, point: toy.position.clone(), distance: camera.position.distanceTo(toy.position) }, ...hits];
+        }
+      }
+
+      if (event.pointerType !== "touch" || (event.type === "pointermove" && (event.buttons & 1) === 0)) return hits;
+      const mesh = dog.current?.getObjectByProperty("isSkinnedMesh", true);
       if (!(mesh instanceof SkinnedMesh)) return hits;
       const nearby = pickNearby(mesh, camera, pointer, size.width, size.height);
       return nearby ? [nearby, ...hits] : hits;
@@ -79,17 +99,7 @@ function StageCamera() {
   return null;
 }
 
-function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null> }) {
-  const trigger = useGameUI((state) => state.trigger);
-  const tool = useGameUI((state) => state.tool);
-
-  const onFloorClick = (event: ThreeEvent<MouseEvent>) => {
-    if (tool === "ball") {
-      event.stopPropagation();
-      trigger("ball");
-    }
-  };
-
+function Room({ shadows }: { shadows: boolean }) {
   return (
     <>
       <color attach="background" args={["#e5dac7"]} />
@@ -97,7 +107,7 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
       <hemisphereLight args={["#fff5dd", "#c1a57e", 2.15]} />
       <directionalLight position={[3.3, 7, 4.5]} intensity={2.7} color="#fff4d9" castShadow={shadows} shadow-mapSize-width={1024} shadow-mapSize-height={1024} shadow-camera-left={-7} shadow-camera-right={7} shadow-camera-top={7} shadow-camera-bottom={-7} />
       <ambientLight intensity={0.35} />
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} onClick={onFloorClick}>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[100, 100]} />
         <meshStandardMaterial color="#b6a385" roughness={1} />
       </mesh>
@@ -150,10 +160,6 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
         <meshStandardMaterial color="#d4bea0" />
       </mesh>
       <FoodBowl />
-      <mesh ref={ball} castShadow position={[ballStart.x, ballGroundY, ballStart.z]}>
-        <sphereGeometry args={[ballStart.radius, 24, 16]} />
-        <meshStandardMaterial color="#becd74" roughness={0.9} />
-      </mesh>
       <mesh position={[dogBed.x, 0.12, dogBed.z]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[dogBed.radius - 0.2, 0.2, 12, 48]} />
         <meshStandardMaterial color="#b9846c" roughness={1} />
@@ -182,9 +188,12 @@ function Room({ shadows, ball }: { shadows: boolean; ball: RefObject<Mesh | null
 
 export function PetWorld() {
   const highQuality = useGameUI((state) => state.quality === "high");
-  const ball = useRef<Mesh>(null);
+  const dog = useRef<Group>(null);
+  const ball = useRef<BallState>({ mesh: null, hovered: false, motion: { phase: "rest" } });
   const handContact = useRef<HandContact | null>(null);
+  const sceneEvents = useCallback((store: RootStore) => roomEvents(store, ball, dog), []);
   const releaseHand = (event: PointerEvent<HTMLDivElement>) => {
+    cancelBallGrab(ball.current, event.pointerId);
     const target = handContact.current;
     if (target?.pointer !== event.pointerId) return;
     target.pressed = false;
@@ -193,12 +202,19 @@ export function PetWorld() {
     }
   };
   const cancelHand = (event: PointerEvent<HTMLDivElement>) => {
+    cancelBallGrab(ball.current, event.pointerId);
     if (handContact.current?.pointer === event.pointerId) handContact.current = null;
   };
   return (
-    <div className="world-canvas" aria-label="秋田犬的 3D 宠物房间" onPointerUp={releaseHand} onPointerCancel={cancelHand}>
+    <div
+      className="world-canvas"
+      aria-label="秋田犬的 3D 宠物房间"
+      onPointerUp={releaseHand}
+      onPointerCancel={cancelHand}
+      onLostPointerCapture={(event) => cancelBallGrab(ball.current, event.pointerId)}
+    >
       <Canvas
-        events={roomEvents}
+        events={sceneEvents}
         shadows={highQuality}
         dpr={highQuality ? [1, 1.75] : [1, 1.1]}
         camera={{ fov: roomFov, position: [0, 2.35, 7.2], near: 0.1, far: 50 }}
@@ -206,10 +222,11 @@ export function PetWorld() {
         fallback={<div className="webgl-fallback">当前设备无法加载 3D 场景，请尝试其他浏览器。</div>}
       >
         <StageCamera />
-        <Room shadows={highQuality} ball={ball} />
+        <Room shadows={highQuality} />
+        <TennisBall ball={ball} dog={dog} />
         <Suspense fallback={null}>
-          <AkitaDog ball={ball} handContact={handContact} />
-          <PlayerHand contact={handContact} />
+          <AkitaDog ball={ball} dog={dog} handContact={handContact} />
+          <PlayerHand contact={handContact} ball={ball} />
         </Suspense>
       </Canvas>
     </div>

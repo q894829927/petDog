@@ -25,10 +25,9 @@ import { createPetReactions } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
+import { ballFloorPoint, type BallState } from "./TennisBall";
 import {
-  ballClearance,
   ballGroundY,
-  ballStart,
   canReclineAt,
   chooseWalkTarget,
   clearsBall,
@@ -62,11 +61,7 @@ const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap", "Recline"];
 type FetchTrip = {
   plan: FetchPlan;
   owner: number | null;
-  launch: FloorPoint;
-  takeoffDepth: number;
-  phase: "flight" | "chase" | "pickup" | "return" | "drop";
-  cancelled: boolean;
-  flightTime: number;
+  phase: "chase" | "pickup" | "return" | "drop";
   waypoint: number;
 };
 
@@ -139,8 +134,9 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
   return fraction === 1;
 }
 
-export function AkitaDog({ ball, handContact }: {
-  ball: RefObject<Mesh | null>;
+export function AkitaDog({ ball, dog, handContact }: {
+  ball: RefObject<BallState>;
+  dog: RefObject<Group | null>;
   handContact: RefObject<HandContact | null>;
 }) {
   const quality = useGameUI((state) => state.quality);
@@ -169,7 +165,6 @@ export function AkitaDog({ ball, handContact }: {
     if (!(mesh instanceof SkinnedMesh)) throw new Error("Akita skinned mesh missing");
     return mesh;
   }, [scene]);
-  const dog = useRef<Group>(null);
   const rig = useRef<Group>(null);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
@@ -185,10 +180,10 @@ export function AkitaDog({ ball, handContact }: {
   const playback = useRef({ name: "Idle", time: 0, interactionSequence: 0 });
   const interaction = useGameUI((state) => state.interaction);
   const trigger = useGameUI((state) => state.trigger);
-  const tool = useGameUI((state) => state.tool);
+  const brushEquipped = useGameUI((state) => state.brushEquipped);
   const lastPetAt = useRef(-Infinity);
   const petStroke = useRef<PetStroke | null>(null);
-  const brushing = useRef<{ pointer: number; startZ: number } | null>(null);
+  const brushing = useRef<{ pointer: number; startZ: number; completed: boolean } | null>(null);
   const rearTap = useRef<RearTap | null>(null);
   const rearReaction = useRef<RearReaction | null>(null);
 
@@ -270,48 +265,37 @@ export function AkitaDog({ ball, handContact }: {
   }, [handContact, mixer, play, rest, scene]);
 
   const startInteraction = useCallback((interaction: Interaction, owner: number | null) => {
-    const toy = ball.current;
+    const sceneBall = ball.current;
+    const toy = sceneBall.mesh;
     const group = dog.current;
     const { pet } = useCloudPet.getState();
     rearReaction.current = null;
     if (interaction.kind !== "pet" || interaction.part === "rear") reactions.fade();
     if (interaction.kind === "ball") {
-      if (fetch.current || !group || !toy) return;
+      if (sceneBall.motion.phase !== "fetch" || fetch.current || !group || !toy) return;
       if (pet && pet.energy < 8) {
+        sceneBall.motion = { phase: "rest" };
         useGameUI.getState().setNotice("团子有点累，休息一会儿再玩球。");
         return;
       }
       const plan = planFetch(group.position, toy.position);
       if (!plan) {
+        sceneBall.motion = { phase: "rest" };
         useGameUI.getState().setNotice("团子在等球周围空出一点地方。");
         return;
       }
-      const dx = toy.position.x - group.position.x;
-      const dz = toy.position.z - group.position.z;
-      // Lift a nearby ball away from the muzzle without sending it off the side of the screen.
-      const takeoffDepth = Math.max(0, ballClearance - Math.hypot(dx, dz)) * (dz < 0 ? -1 : 1);
-      fetch.current = {
-        plan,
-        owner,
-        launch: { x: toy.position.x, z: toy.position.z },
-        takeoffDepth,
-        phase: "flight",
-        cancelled: false,
-        flightTime: 0,
-        waypoint: 0,
-      };
+      fetch.current = { plan, owner: sceneBall.motion.owner, phase: "chase", waypoint: 0 };
       approach.current = null;
       roaming.current.target = null;
       play("Idle");
-      useGameUI.getState().setNotice("球抛出去了！");
+      useGameUI.getState().setNotice("团子去追球了！");
       return;
     }
 
     const kind = interaction.kind;
-    const trip = fetch.current;
     if (kind === "feed" || kind === "water" || kind === "call") {
       if (!group || approach.current?.kind === kind) return;
-      const floorBall = trip?.phase === "flight" ? trip.plan.pickup.ball : toy?.position ?? ballStart;
+      const floorBall = ballFloorPoint(sceneBall);
       const ui = useGameUI.getState();
       if (kind === "call") {
         const plan = planCall(group.position, floorBall) ??
@@ -332,10 +316,9 @@ export function AkitaDog({ ball, handContact }: {
       approach.current = null;
     }
 
-    if (trip?.phase === "flight") {
-      trip.cancelled = true;
-    } else {
-      if (trip && toy) toy.position.y = ballGroundY;
+    if (fetch.current) {
+      if (toy) toy.position.y = ballGroundY;
+      sceneBall.motion = { phase: "rest" };
       fetch.current = null;
     }
     roaming.current.target = null;
@@ -350,12 +333,15 @@ export function AkitaDog({ ball, handContact }: {
       else reactToPet(interaction);
       recordPetAction(kind, owner);
     }
-  }, [ball, play, reactions, reactToPet]);
+  }, [ball, dog, play, reactions, reactToPet]);
 
   useEffect(() => {
     if (!interaction || interaction.sequence === playback.current.interactionSequence) return;
     playback.current.interactionSequence = interaction.sequence;
     if (interaction.kind !== "pet") petStroke.current = null;
+    if (interaction.kind !== "ball" && !fetch.current && ball.current.motion.phase === "fetch") {
+      ball.current.motion = { phase: "rest" };
+    }
     const owner = useCloudPet.getState().accountId;
     const lying = recline.current;
     if (lying) {
@@ -375,7 +361,7 @@ export function AkitaDog({ ball, handContact }: {
     } else {
       startInteraction(interaction, owner);
     }
-  }, [interaction, play, reactToPet, startInteraction]);
+  }, [ball, interaction, play, reactToPet, startInteraction]);
 
   const advanceRecline = (lying: Recline, group: Group, body: Group, action: AnimationAction, step: number, petting: boolean) => {
     const finished = action.time >= action.getClip().duration;
@@ -431,26 +417,6 @@ export function AkitaDog({ ball, handContact }: {
 
   const advanceFetch = (trip: FetchTrip, group: Group, toy: Mesh, action: AnimationAction, step: number) => {
     const { pickup, delivery, outbound, homeward } = trip.plan;
-    if (trip.phase === "flight") {
-      trip.flightTime += step;
-      const t = Math.min(1, trip.flightTime / 1.15);
-      // Cross the room near the top of the arc and descend clear of the dog.
-      const travel = MathUtils.smootherstep(t, 0, 1);
-      const lift = 1 - (1 - 2 * t) ** 4;
-      const takeoff = trip.takeoffDepth * MathUtils.smoothstep(t, 0, 0.1) * (1 - travel);
-      toy.position.set(
-        MathUtils.lerp(trip.launch.x, pickup.ball.x, travel),
-        ballGroundY + lift * 2.1,
-        MathUtils.lerp(trip.launch.z, pickup.ball.z, travel) + takeoff,
-      );
-      toy.rotation.x += step * 5;
-      if (t === 1) {
-        if (trip.cancelled) fetch.current = null;
-        else trip.phase = "chase";
-      }
-      return;
-    }
-
     if (trip.phase === "pickup" || trip.phase === "drop") {
       const contacted = action.time >= biteTime;
       if (trip.phase === "pickup" ? contacted : !contacted) holdBall(toy);
@@ -464,6 +430,7 @@ export function AkitaDog({ ball, handContact }: {
         useGameUI.getState().setNotice("团子叼起球往回走。");
       } else {
         fetch.current = null;
+        ball.current.motion = { phase: "rest" };
         rest();
         useGameUI.getState().setNotice("团子把球叼回来了！");
         recordPetAction("play", trip.owner);
@@ -498,7 +465,7 @@ export function AkitaDog({ ball, handContact }: {
     const action = currentAction.current;
     if (!group || !action) return;
 
-    const toy = ball.current;
+    const toy = ball.current.mesh;
     const clip = action.getClip().name;
     const cue = rearReaction.current;
     if (cue?.phase === "contact") {
@@ -598,7 +565,7 @@ export function AkitaDog({ ball, handContact }: {
 
     const touch = handContact.current;
     const stroke = petStroke.current;
-    const petting = tool === "pet" && touch?.pressed === true && stroke?.pointer === touch.pointer;
+    const petting = touch?.pressed === true && stroke?.pointer === touch.pointer;
     if (stroke) {
       const { rub } = stroke;
       if (petting && !recline.current && isRubArea(touch.gesture)) {
@@ -634,13 +601,13 @@ export function AkitaDog({ ball, handContact }: {
       return;
     }
 
-    const grooming = tool === "brush" && touch?.pressed && touch.gesture === "brush";
+    const grooming = brushEquipped && touch?.pressed && touch.gesture === "brush";
     if (grooming && clip === "Walk") {
       rest();
       return;
     }
     const activity = roaming.current;
-    const ballPosition = toy?.position ?? ballStart;
+    const ballPosition = ballFloorPoint(ball.current);
     if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
     if (clip === "Idle") {
       if (petting || grooming) return;
@@ -680,11 +647,6 @@ export function AkitaDog({ ball, handContact }: {
     }
   });
 
-  const throwOnClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (tool === "ball") trigger("ball");
-  };
-
   const contactFromPointer = (event: ThreeEvent<PointerEvent>, gesture: HandGesture, pressed: boolean): HandContact | null => {
     const { object, face, barycoord } = event;
     if (!dog.current || !(object instanceof SkinnedMesh) || !face || !barycoord) return null;
@@ -720,41 +682,39 @@ export function AkitaDog({ ball, handContact }: {
   };
 
   const pointerDown = (event: ThreeEvent<PointerEvent>) => {
-    if (!event.isPrimary || event.button !== 0 || (tool !== "pet" && tool !== "brush")) return;
+    if (!event.isPrimary || event.button !== 0) return;
     petStroke.current = null;
     brushing.current = null;
     rearTap.current = null;
-    const canTapRear = tool === "pet" && !nap.current && !recline.current;
+    const canTapRear = !nap.current && !recline.current;
     const target = hitPetTarget(event, canTapRear ? "tap" : "stroke");
-    if (!target || (tool === "brush" && target.part !== "back")) return;
+    if (!target) return;
     event.stopPropagation();
-    if (tool === "pet") {
-      const now = performance.now();
-      if (target.part === "rear") {
-        const contact = contactFromPointer(event, target.part, true);
-        if (!contact) return;
-        rearTap.current = { contact, target, x: event.clientX, y: event.clientY, startedAt: now };
-        const normalTouch = hitPetTarget(event);
-        if (normalTouch) handContact.current = { ...contact, gesture: normalTouch.part };
-        (event.target as Element).setPointerCapture(event.pointerId);
-      } else {
-        placeHand(event, target.part, true);
-        startPetStroke(event.pointerId, target, now);
-      }
-      return;
+    const now = performance.now();
+    if (brushEquipped && target.part === "back" && dog.current) {
+      placeHand(event, "brush", true);
+      const startZ = dog.current.worldToLocal(event.point.clone()).z;
+      brushing.current = { pointer: event.pointerId, startZ, completed: false };
+    } else if (target.part === "rear") {
+      const contact = contactFromPointer(event, target.part, true);
+      if (!contact) return;
+      rearTap.current = { contact, target, x: event.clientX, y: event.clientY, startedAt: now };
+      const normalTouch = hitPetTarget(event);
+      if (normalTouch) handContact.current = { ...contact, gesture: normalTouch.part };
+      (event.target as Element).setPointerCapture(event.pointerId);
+    } else {
+      placeHand(event, target.part, true);
+      startPetStroke(event.pointerId, target, now);
     }
-    placeHand(event, "brush", true);
-    if (!dog.current) return;
-    const startZ = dog.current.worldToLocal(event.point.clone()).z;
-    brushing.current = { pointer: event.pointerId, startZ };
   };
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {
-    if (!event.isPrimary || (tool !== "pet" && tool !== "brush")) return;
+    if (!event.isPrimary) return;
     const picked = hitPetTarget(event);
     const part = picked?.part;
-    const onBack = tool === "brush" && part === "back";
     const pressed = (event.buttons & 1) !== 0;
+    const brushStroke = brushing.current?.pointer === event.pointerId ? brushing.current : null;
+    const onBackWithBrush = brushEquipped && part === "back" && (!pressed || brushStroke !== null);
     const target = handContact.current;
     const now = performance.now();
     if (target?.gesture === "rear" && now < target.visibleUntil) return;
@@ -764,15 +724,15 @@ export function AkitaDog({ ball, handContact }: {
       if (Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= limit) return;
       rearTap.current = null;
       (event.target as Element).releasePointerCapture(event.pointerId);
-      if (picked && tool === "pet") startPetStroke(event.pointerId, picked, now);
+      if (picked) startPetStroke(event.pointerId, picked, now);
     }
-    if (part && (tool === "pet" || onBack) && (event.pointerType === "mouse" || pressed)) {
-      placeHand(event, tool === "brush" ? "brush" : part, pressed);
-    } else if ((!part || (tool === "brush" && !onBack)) && target?.pointer === event.pointerId) {
+    if (part && (!brushStroke || onBackWithBrush) && (event.pointerType === "mouse" || pressed)) {
+      placeHand(event, onBackWithBrush ? "brush" : part, pressed);
+    } else if (target?.pointer === event.pointerId) {
       handContact.current = null;
     }
     const petting = petStroke.current;
-    if (tool === "pet" && petting?.pointer === event.pointerId) {
+    if (petting?.pointer === event.pointerId) {
       if (!pressed || !picked || samePetTarget(picked, petting.target)) {
         petting.next = null;
       } else if (!samePetTarget(picked, petting.next?.target)) {
@@ -780,15 +740,10 @@ export function AkitaDog({ ball, handContact }: {
       }
     }
 
-    const stroke = brushing.current;
-    if (stroke?.pointer !== event.pointerId) return;
-    if (!pressed || !onBack || !dog.current) {
-      brushing.current = null;
-      return;
-    }
+    if (!brushStroke || brushStroke.completed || !pressed || !onBackWithBrush || !dog.current) return;
     const z = dog.current.worldToLocal(event.point.clone()).z;
-    if ((stroke.startZ - z) * dogScale < brushStrokeLength) return;
-    brushing.current = null;
+    if ((brushStroke.startZ - z) * dogScale < brushStrokeLength) return;
+    brushStroke.completed = true;
     trigger("brush", { part: "back" });
   };
 
@@ -798,7 +753,7 @@ export function AkitaDog({ ball, handContact }: {
       rearTap.current = null;
       const pointerTarget = event.target as Element;
       if (pointerTarget.hasPointerCapture(event.pointerId)) pointerTarget.releasePointerCapture(event.pointerId);
-      if (event.type === "pointerup" && tool === "pet") {
+      if (event.type === "pointerup") {
         const now = performance.now();
         const limit = tapping.contact.touch ? 12 : rearDragLimit;
         if (now - tapping.startedAt <= rearTapLimit && Math.hypot(event.clientX - tapping.x, event.clientY - tapping.y) <= limit) {
@@ -820,12 +775,12 @@ export function AkitaDog({ ball, handContact }: {
       else petStroke.current = null;
       const group = dog.current;
       const base = currentAction.current?.getClip().name;
-      if (event.type === "pointerup" && tool === "pet" && !recline.current && !nap.current && !approach.current && !fetch.current &&
+      if (event.type === "pointerup" && !recline.current && !nap.current && !approach.current && !fetch.current &&
           group && (base === "Idle" || base === "Sit") && isRubArea(target?.gesture) &&
           petting.rub.seconds >= 1.15 && petting.rub.distance >= (target?.touch ? 14 : 22)) {
         const facingCamera = headingTo(group.position, event.camera.position);
         const headings = [facingCamera + Math.PI / 2, facingCamera + 1.22, facingCamera + 1.91];
-        const heading = headings.find((angle) => canReclineAt(group.position, angle, ball.current?.position ?? ballStart));
+        const heading = headings.find((angle) => canReclineAt(group.position, angle, ballFloorPoint(ball.current)));
         if (heading !== undefined) {
           recline.current = { phase: "turn", heading, holdFor: 6, pending: null };
           reactions.fade();
@@ -851,7 +806,6 @@ export function AkitaDog({ ball, handContact }: {
       position={[0.12, rugSurface, 0.35]}
       rotation={[0, -0.65, 0]}
       scale={dogScale}
-      onClick={throwOnClick}
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
       onPointerUp={finishPointer}

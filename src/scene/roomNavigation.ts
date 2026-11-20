@@ -9,7 +9,7 @@ export const ballGroundY = rugSurface + ballStart.radius;
 
 // The scaled Akita reaches 1.24 units from its center near the floor.
 const dogClearance = 1.25;
-export const ballClearance = dogClearance + ballStart.radius;
+const ballClearance = dogClearance + ballStart.radius;
 // The running clip reaches 1.36 units near the floor.
 const runClearance = 1.38;
 const walkRadius = rug.radius - dogClearance;
@@ -116,12 +116,7 @@ function fetchStop(ball: FloorPoint, heading: number) {
   };
 }
 
-const pickupStops = [
-  fetchStop({ x: -1.45, z: -0.5 }, -Math.PI / 2),
-  fetchStop({ x: 1.45, z: 0.22 }, Math.PI / 2),
-  fetchStop({ x: 0, z: 1.85 }, 0),
-  fetchStop({ x: 1.48, z: -0.29 }, 2.2),
-];
+const alternateLandings = [{ x: -1.45, z: -0.5 }, { x: 1.45, z: 0.22 }, { x: 0, z: 1.85 }, { x: 1.48, z: -0.29 }];
 const deliveryStop = fetchStop(ballStart, Math.PI / 3);
 
 export type FetchPlan = {
@@ -132,20 +127,44 @@ export type FetchPlan = {
 };
 
 export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null {
-  let plan: FetchPlan | null = null;
-  let farthest = -1;
-  for (const pickup of pickupStops) {
-    if (Math.hypot(pickup.ball.x - ball.x, pickup.ball.z - ball.z) < 0.3) continue;
-    if (Math.hypot(pickup.ball.x - start.x, pickup.ball.z - start.z) < ballClearance) continue;
-    const distance = Math.hypot(pickup.approach.x - start.x, pickup.approach.z - start.z);
-    if (distance <= farthest) continue;
+  if (!clearsRoomProps(ball, ball, ballStart.radius)) return null;
+  const direct = Math.atan2(ball.x - start.x, ball.z - start.z);
+  const outward = Math.atan2(ball.x - rug.x, ball.z - rug.z);
+  for (const heading of [direct, outward, outward - 0.55, outward + 0.55, outward - 1.05, outward + 1.05]) {
+    const pickup = fetchStop(ball, heading);
+    if (Math.hypot(pickup.approach.x - rug.x, pickup.approach.z - rug.z) > walkRadius) continue;
     const outbound = routeTo(start, pickup.approach, runClearance);
     const homeward = routeTo(pickup.approach, deliveryStop.approach, dogClearance);
-    if (!outbound || !homeward) continue;
-    farthest = distance;
-    plan = { pickup, delivery: deliveryStop, outbound, homeward };
+    if (outbound && homeward) return { pickup, delivery: deliveryStop, outbound, homeward };
   }
-  return plan;
+  return null;
+}
+
+export function chooseBallLanding(start: FloorPoint, from: FloorPoint, aim: FloorPoint): FloorPoint | undefined {
+  const limit = rug.radius - ballStart.radius - 0.1;
+  const candidates: FloorPoint[] = [...alternateLandings];
+  const dx = aim.x - from.x;
+  const dz = aim.z - from.z;
+  const range = Math.hypot(dx, dz);
+  // A blocked aim can shorten the throw or shift it to one side within the same direction.
+  for (const fraction of [1, 0.75, 0.5, 0.25]) {
+    for (let i = 0; i < 9; i++) {
+      const angle = i * Math.PI / 4;
+      const offset = i === 8 ? 0 : 0.42;
+      const x = from.x + dx * fraction + offset * Math.sin(angle) - rug.x;
+      const z = from.z + dz * fraction + offset * Math.cos(angle) - rug.z;
+      const scale = Math.min(1, limit / Math.hypot(x, z));
+      candidates.push({ x: rug.x + x * scale, z: rug.z + z * scale });
+    }
+  }
+  const distance = (point: FloorPoint) => Math.hypot(point.x - aim.x, point.z - aim.z);
+  return candidates.sort((a, b) => distance(a) - distance(b)).find((point) => {
+    const x = point.x - from.x;
+    const z = point.z - from.z;
+    const travel = Math.hypot(x, z);
+    return travel >= 0.3 && x * dx + z * dz >= 0.43 * range * travel &&
+      Math.hypot(point.x - start.x, point.z - start.z) >= ballClearance && planFetch(start, point);
+  });
 }
 
 export function chooseWalkTarget(

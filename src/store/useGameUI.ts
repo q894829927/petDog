@@ -1,6 +1,5 @@
 import { create } from "zustand";
 
-export type ToolMode = "pet" | "ball" | "brush";
 export type InteractionKind = "pet" | "call" | "feed" | "water" | "ball" | "brush";
 export type MealKind = "feed" | "water";
 export type PetPart = "head" | "ear" | "cheek" | "chin" | "chest" | "back" | "flank" | "leg" | "paw" | "tailRoot" | "tail" | "belly" | "rear";
@@ -12,7 +11,7 @@ export type StatKey = "hunger" | "water" | "energy" | "clean";
 export type Interaction = PetTarget & { kind: InteractionKind; sequence: number };
 
 type GameUI = {
-  tool: ToolMode;
+  brushEquipped: boolean;
   foodOpen: boolean;
   panel: ActivePanel;
   statDetail: StatKey | null;
@@ -20,7 +19,7 @@ type GameUI = {
   interaction: Interaction | null;
   bowl: { kind: MealKind; portions: number } | null;
   quality: "high" | "low";
-  setTool: (tool: ToolMode) => void;
+  toggleBrush: () => void;
   toggleFood: () => void;
   setPanel: (panel: ActivePanel) => void;
   setStatDetail: (key: StatKey | null) => void;
@@ -48,7 +47,7 @@ export const petMessages: Record<PetPart, string> = {
 };
 
 export const useGameUI = create<GameUI>((set) => ({
-  tool: "pet",
+  brushEquipped: false,
   foodOpen: false,
   panel: null,
   statDetail: null,
@@ -56,8 +55,8 @@ export const useGameUI = create<GameUI>((set) => ({
   interaction: null,
   bowl: null,
   quality: "high",
-  setTool: (tool) => set({ tool, foodOpen: false, statDetail: null }),
-  toggleFood: () => set((state) => ({ foodOpen: !state.foodOpen, tool: "pet", statDetail: null })),
+  toggleBrush: () => set((state) => ({ brushEquipped: !state.brushEquipped, foodOpen: false, statDetail: null })),
+  toggleFood: () => set((state) => ({ foodOpen: !state.foodOpen, brushEquipped: false, statDetail: null })),
   setPanel: (panel) => set({ panel, foodOpen: false, statDetail: null }),
   setStatDetail: (statDetail) => set({ statDetail, foodOpen: false }),
   setQuality: (quality) => set({ quality }),

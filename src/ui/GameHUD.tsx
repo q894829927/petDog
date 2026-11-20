@@ -2,7 +2,7 @@ import { useEffect, type CSSProperties } from "react";
 import { Icon } from "./Icons";
 import { CloudPanel, personalityLabel } from "./CloudPanel";
 import { useCloudPet } from "../cloud/useCloudPet";
-import { useGameUI, type StatKey, type ToolMode } from "../store/useGameUI";
+import { useGameUI, type StatKey } from "../store/useGameUI";
 
 const previewStats: { key: StatKey; label: string; icon: "bowl" | "drop" | "bolt" | "sparkle"; value: number }[] = [
   { key: "hunger", label: "饱腹", icon: "bowl", value: 76 },
@@ -49,15 +49,9 @@ function StatRings() {
   );
 }
 
-const toolHint: Record<ToolMode, string> = {
-  pet: "轻触团子，摸摸它",
-  ball: "点击团子或地面，把球抛出去",
-  brush: "从团子的肩背朝尾巴梳",
-};
-
 function InteractionDock() {
-  const tool = useGameUI((state) => state.tool);
-  const setTool = useGameUI((state) => state.setTool);
+  const brushEquipped = useGameUI((state) => state.brushEquipped);
+  const toggleBrush = useGameUI((state) => state.toggleBrush);
   const foodOpen = useGameUI((state) => state.foodOpen);
   const toggleFood = useGameUI((state) => state.toggleFood);
   const trigger = useGameUI((state) => state.trigger);
@@ -70,19 +64,13 @@ function InteractionDock() {
         </div>
       )}
       <nav className="action-dock glass" aria-label="互动工具">
-        <button type="button" className={"dock-item" + (tool === "pet" && !foodOpen ? " dock-item--active" : "")} onClick={() => setTool("pet")} aria-pressed={tool === "pet" && !foodOpen}>
-          <span className="dock-icon"><Icon name="hand" size={24}/></span><span>抚摸</span>
-        </button>
         <button type="button" className="dock-item" onClick={() => trigger("call")}>
           <span className="dock-icon"><Icon name="whistle" size={24}/></span><span>呼唤</span>
         </button>
         <button type="button" className={"dock-item" + (foodOpen ? " dock-item--active" : "")} onClick={toggleFood} aria-expanded={foodOpen}>
           <span className="dock-icon"><Icon name="bowl" size={24}/></span><span>饮食</span>
         </button>
-        <button type="button" className={"dock-item" + (tool === "ball" ? " dock-item--active" : "")} onClick={() => setTool(tool === "ball" ? "pet" : "ball")} aria-pressed={tool === "ball"}>
-          <span className="dock-icon"><Icon name="ball" size={24}/></span><span>玩球</span>
-        </button>
-        <button type="button" className={"dock-item" + (tool === "brush" ? " dock-item--active" : "")} onClick={() => setTool(tool === "brush" ? "pet" : "brush")} aria-pressed={tool === "brush"}>
+        <button type="button" className={"dock-item" + (brushEquipped ? " dock-item--active" : "")} onClick={toggleBrush} aria-pressed={brushEquipped}>
           <span className="dock-icon"><Icon name="comb" size={24}/></span><span>梳毛</span>
         </button>
       </nav>
@@ -138,7 +126,7 @@ export function GameHUD() {
   const setPanel = useGameUI((state) => state.setPanel);
   const notice = useGameUI((state) => state.notice);
   const clearNotice = useGameUI((state) => state.clearNotice);
-  const tool = useGameUI((state) => state.tool);
+  const brushEquipped = useGameUI((state) => state.brushEquipped);
   const foodOpen = useGameUI((state) => state.foodOpen);
   const { pet, connected, email, busy, error } = useCloudPet();
   const name = pet?.name ?? "团子";
@@ -176,7 +164,8 @@ export function GameHUD() {
       <div className="scene-tag"><Icon name="sparkle" size={15}/><span>{name}的小窝</span></div>
       {notice && <div className="scene-notice glass" role="status" aria-live="polite"><Icon name="heart" size={17}/><span>{notice.replaceAll("团子", () => name)}</span></div>}
       <div className="hud-bottom">
-        <div className="action-hint"><Icon name="paw" size={17}/><span>{foodOpen ? "选择食物或饮水" : toolHint[tool].replaceAll("团子", () => name)}</span></div>
+        <div className="action-hint"><Icon name="paw" size={17}/><span>{foodOpen ? "选择食物或饮水" :
+          brushEquipped ? "从" + name + "的肩背朝尾巴梳" : "按住球拖动，松手抛出"}</span></div>
         <InteractionDock />
       </div>
       <DetailsPanel />

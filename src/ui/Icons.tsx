@@ -1,8 +1,8 @@
 import type { ReactNode, SVGProps } from "react";
 
 type IconName =
-  | "paw" | "heart" | "bowl" | "drop" | "bolt" | "sparkle" | "hand"
-  | "whistle" | "ball" | "comb" | "settings" | "volume" | "mute"
+  | "paw" | "heart" | "bowl" | "drop" | "bolt" | "sparkle"
+  | "whistle" | "comb" | "settings" | "volume" | "mute"
   | "chevron" | "close" | "back" | "cloud" | "moon" | "check";
 
 type Props = SVGProps<SVGSVGElement> & { name: IconName; size?: number };
@@ -15,9 +15,7 @@ export function Icon({ name, size = 22, ...props }: Props) {
     drop: <path d="M12 2.5S5.5 10 5.5 14.2a6.5 6.5 0 0 0 13 0C18.5 10 12 2.5 12 2.5Z"/>,
     bolt: <path d="m13.6 2.5-8.7 11H12l-1.6 8 8.7-11H12z"/>,
     sparkle: <><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4-2.4 7.1-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z"/></>,
-    hand: <><path d="M8.8 12V5.4a1.4 1.4 0 0 1 2.8 0v5.1-7a1.4 1.4 0 0 1 2.8 0v7-4a1.4 1.4 0 0 1 2.8 0v4.4a1.4 1.4 0 0 1 2.8.3v3.2c0 4.3-2.6 6.9-6.6 6.9H12c-2.4 0-3.7-.7-5.1-2.6L3.7 14a1.6 1.6 0 0 1 2.5-2L8.8 15"/></>,
     whistle: <><circle cx="10" cy="13.5" r="5.5"/><circle cx="10" cy="13.5" r="2"/><path d="M13 8.9 18.5 5l2 3-5.2 4M4 5l1.7 1.7M10 2.5v2"/></>,
-    ball: <><circle cx="12" cy="12" r="9"/><path d="M4.8 6.5c5 3.1 9.3 7.9 12.7 12.7M18.8 5.7c-1.7 6.4-5.2 10.9-10.9 13"/></>,
     comb: <><path d="M4 6.5h16v4.6H4zM6 11.1V21M9 11.1V18M12 11.1V21M15 11.1V18M18 11.1V21"/></>,
     settings: <><path d="M10 3h4l.6 2.1 1.9.9 2-.9 2.7 2.9-1.1 1.9.5 2.1 1.7 1v3.5l-2.1.6-.8 1.8.9 2-2.8 2.6-2-.9-2 .6-.9 1.8h-3.5l-.6-2.1-1.8-.8-2 .9-2.7-2.7.9-2-.6-2L2 14v-3.5l2.1-.6.8-1.8-.9-2L6.8 3.5l2 .9L10 3Z" transform="translate(0 -1.2) scale(1 .95)"/><circle cx="12" cy="12" r="3"/></>,
     volume: <><path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6a8 8 0 0 1 0 12"/></>,
