@@ -1,0 +1,181 @@
+import { useMemo } from "react";
+import { Shape, Vector2 } from "three";
+import { useGameUI } from "../store/useGameUI";
+import { dogBed, floorSurface, foodBowl, roomBounds, rug, windowPlant } from "./roomNavigation";
+
+const width = roomBounds.maxX - roomBounds.minX;
+const depth = roomBounds.maxZ - roomBounds.minZ;
+const wallHeight = 4.25;
+const windowOpening = { left: -2.12, right: 4.95, bottom: 0.48, top: 3.63 };
+const plaster = "#ece4d4";
+const trim = "#c8a77b";
+const bowlProfile = [
+  [0, 0.024], [0.26, 0.024], [0.32, 0.11], [0.31, 0.116],
+  [0.29, 0.11], [0.246, 0.047], [0, 0.047],
+].map(([x, y]) => new Vector2(x, y));
+
+function RoomBox({ position, size, color }: {
+  position: [number, number, number];
+  size: [number, number, number];
+  color: string;
+}) {
+  return (
+    <mesh position={position} receiveShadow>
+      <boxGeometry args={size} />
+      <meshStandardMaterial color={color} roughness={0.88} />
+    </mesh>
+  );
+}
+
+function roundedMat(width: number, depth: number, radius: number) {
+  const shape = new Shape();
+  const x = width / 2;
+  const z = depth / 2;
+  shape.moveTo(-x + radius, -z);
+  shape.lineTo(x - radius, -z);
+  shape.quadraticCurveTo(x, -z, x, -z + radius);
+  shape.lineTo(x, z - radius);
+  shape.quadraticCurveTo(x, z, x - radius, z);
+  shape.lineTo(-x + radius, z);
+  shape.quadraticCurveTo(-x, z, -x, z - radius);
+  shape.lineTo(-x, -z + radius);
+  shape.quadraticCurveTo(-x, -z, -x + radius, -z);
+  return shape;
+}
+
+function InteractionRug() {
+  const { border, center } = useMemo(() => ({
+    border: roundedMat(rug.width, rug.depth, 0.44),
+    center: roundedMat(rug.width - 0.18, rug.depth - 0.18, 0.34),
+  }), []);
+  return (
+    <group name="Interaction rug" position={[rug.x, floorSurface, rug.z]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position-z={0.003} receiveShadow>
+        <shapeGeometry args={[border, 10]} />
+        <meshStandardMaterial color="#bd9f78" roughness={1} />
+      </mesh>
+      <mesh position-z={0.005} receiveShadow>
+        <shapeGeometry args={[center, 10]} />
+        <meshStandardMaterial color="#e4ceae" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+function FoodBowl() {
+  const bowl = useGameUI((state) => state.bowl);
+  return (
+    <group name="Food bowl" position={[foodBowl.x, floorSurface, foodBowl.z]}>
+      <mesh castShadow receiveShadow>
+        <latheGeometry args={[bowlProfile, 40]} />
+        <meshStandardMaterial color="#748b72" roughness={0.47} />
+      </mesh>
+      {bowl?.kind === "feed" && Array.from({ length: bowl.portions * 5 }, (_, index) => {
+        const angle = index * 2.4;
+        const radius = Math.sqrt(index / 15) * 0.21;
+        return (
+          <mesh key={index} position={[Math.cos(angle) * radius, 0.072, Math.sin(angle) * radius]} scale={[1, 0.67, 1]}>
+            <sphereGeometry args={[0.038, 8, 6]} />
+            <meshStandardMaterial color="#704a32" roughness={0.93} />
+          </mesh>
+        );
+      })}
+      {bowl?.kind === "water" && (
+        <mesh position={[0, 0.053 + 0.014 * bowl.portions, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.246 + 0.012 * bowl.portions, 40]} />
+          <meshStandardMaterial color="#a8c8ba" roughness={0.2} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function PictureWindow() {
+  const { left, right, bottom, top } = windowOpening;
+  const x = (left + right) / 2;
+  const y = (bottom + top) / 2;
+  const w = right - left;
+  const h = top - bottom;
+  const z = roomBounds.minZ;
+  return (
+    <group name="Picture window">
+      <RoomBox position={[(roomBounds.minX + left) / 2, wallHeight / 2, z]} size={[left - roomBounds.minX, wallHeight, 0.2]} color={plaster} />
+      <RoomBox position={[(roomBounds.maxX + right) / 2, wallHeight / 2, z]} size={[roomBounds.maxX - right, wallHeight, 0.2]} color={plaster} />
+      <RoomBox position={[x, bottom / 2, z]} size={[w, bottom, 0.2]} color={plaster} />
+      <RoomBox position={[x, (top + wallHeight) / 2, z]} size={[w, wallHeight - top, 0.2]} color={plaster} />
+      <mesh position={[x, y, z - 0.19]}>
+        <planeGeometry args={[w + 0.18, h + 0.18]} />
+        <meshBasicMaterial color="#d4e4d7" />
+      </mesh>
+      {[left, left + w / 3, right - w / 3, right].map((divider) => (
+        <RoomBox key={divider} position={[divider, y, z + 0.02]} size={[0.095, h, 0.23]} color={trim} />
+      ))}
+      {[bottom, top].map((rail) => (
+        <RoomBox key={rail} position={[x, rail, z + 0.04]} size={[w + 0.1, 0.1, 0.28]} color={trim} />
+      ))}
+    </group>
+  );
+}
+
+function WindowPlant() {
+  return (
+    <group name="Window plant" position={[windowPlant.x, floorSurface, windowPlant.z]}>
+      <mesh position-y={0.23} castShadow receiveShadow>
+        <cylinderGeometry args={[0.27, 0.19, 0.46, 28]} />
+        <meshStandardMaterial color="#b58567" roughness={0.93} />
+      </mesh>
+      <mesh position-y={0.74} castShadow>
+        <cylinderGeometry args={[0.022, 0.038, 0.78, 10]} />
+        <meshStandardMaterial color="#596e42" roughness={0.9} />
+      </mesh>
+      {Array.from({ length: 8 }, (_, index) => {
+        const angle = index * 2.4;
+        return (
+          <mesh key={index} position={[Math.cos(angle) * 0.2, 0.64 + index * 0.092, Math.sin(angle) * 0.2]}
+            rotation={[0.25, -angle, -0.42]} scale={[0.28 - index * 0.012, 0.11, 0.053]} castShadow>
+            <sphereGeometry args={[1, 14, 8]} />
+            <meshStandardMaterial color={index % 2 ? "#688450" : "#78955d"} roughness={0.76} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+export function LivingRoom({ shadows }: { shadows: boolean }) {
+  const centerZ = (roomBounds.minZ + roomBounds.maxZ) / 2;
+  return (
+    <>
+      <color attach="background" args={["#e8dcc9"]} />
+      <hemisphereLight args={["#fff5e4", "#c8b09e", 2.05]} />
+      <directionalLight position={[3.8, 7.5, -4.5]} intensity={2.32} color="#fff0d2"
+        castShadow={shadows} shadow-mapSize-width={1024} shadow-mapSize-height={1024}
+        shadow-camera-left={-8.1} shadow-camera-right={8.1} shadow-camera-top={8.1} shadow-camera-bottom={-8.1}
+        shadow-normalBias={0.035} />
+      <directionalLight position={[-2.9, 4.2, 6]} intensity={0.85} color="#fff7ed" />
+      <group name="Living room">
+        <mesh name="Wood floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorSurface, centerZ + 2]}>
+          <planeGeometry args={[width, depth + 4]} />
+          <meshStandardMaterial color="#d4b58d" roughness={0.84} />
+        </mesh>
+        <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color="#e2d7c4" />
+        <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color={plaster} />
+        <RoomBox position={[0, 0.1, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
+        <PictureWindow />
+        <WindowPlant />
+        <InteractionRug />
+        <FoodBowl />
+        <group name="Dog bed" position={[dogBed.x, floorSurface, dogBed.z]}>
+          <mesh position-y={0.17} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
+            <torusGeometry args={[dogBed.radius - 0.19, 0.19, 16, 56]} />
+            <meshStandardMaterial color="#9e7e6e" roughness={0.98} />
+          </mesh>
+          <mesh position-y={0.055} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <circleGeometry args={[dogBed.radius - 0.14, 48]} />
+            <meshStandardMaterial color="#d7bc9f" roughness={1} />
+          </mesh>
+        </group>
+      </group>
+    </>
+  );
+}

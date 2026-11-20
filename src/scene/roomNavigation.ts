@@ -1,18 +1,22 @@
 export type FloorPoint = { x: number; z: number };
 
-export const rug = { x: 0, z: 0.32, radius: 2.62 };
-export const rugSurface = 0.026;
-export const foodBowl = { x: -1.82, z: 0.91, radius: 0.37 };
-export const dogBed = { x: 1.93, z: -1.85, radius: 1 };
-export const ballStart = { x: 1.4, z: 0.9, radius: 0.13 };
-export const ballGroundY = rugSurface + ballStart.radius;
+export const roomBounds = { minX: -6, maxX: 6, minZ: -6.2, maxZ: 3.8 };
+export const floorSurface = 0.026;
+export const rug = { x: 0, z: 1.26, width: 4.85, depth: 2.85 };
+export const dogHome = { x: -0.36, z: 0.72 };
+export const foodBowl = { x: -3.75, z: 1.63, radius: 0.37 };
+export const dogBed = { x: 3.93, z: -3.67, radius: 0.93 };
+export const windowPlant = { x: 5, z: -5.05, radius: 0.45 };
+export const ballStart = { x: 1.26, z: 1.67, radius: 0.13 };
+export const ballGroundY = floorSurface + ballStart.radius;
 
 // The scaled Akita reaches 1.24 units from its center near the floor.
 const dogClearance = 1.25;
 const ballClearance = dogClearance + ballStart.radius;
 // The running clip reaches 1.36 units near the floor.
 const runClearance = 1.38;
-const walkRadius = rug.radius - dogClearance;
+const roomProps = [foodBowl, dogBed, windowPlant];
+const routeTurns: FloorPoint[] = [{ x: 0, z: -3.72 }, { x: 0, z: -0.35 }, { x: 0, z: 1.64 }];
 
 function clearsObstacle(
   start: FloorPoint,
@@ -39,16 +43,22 @@ export function clearsBall(start: FloorPoint, destination: FloorPoint, ball: Flo
   return clearsObstacle(start, destination, ball, ballStart.radius);
 }
 
-function clearsRoomProps(start: FloorPoint, destination: FloorPoint, dogRadius: number) {
-  return clearsObstacle(start, destination, foodBowl, foodBowl.radius, dogRadius) &&
-    clearsObstacle(start, destination, dogBed, dogBed.radius, dogRadius);
+function withinRoom({ x, z }: FloorPoint, margin: number) {
+  return x >= roomBounds.minX + margin && x <= roomBounds.maxX - margin &&
+    z >= roomBounds.minZ + margin && z <= roomBounds.maxZ - margin;
+}
+
+function clearsRoomProps(start: FloorPoint, destination: FloorPoint, clearance: number) {
+  return withinRoom(destination, clearance) && roomProps.every((prop) =>
+    clearsObstacle(start, destination, prop, prop.radius, clearance),
+  );
 }
 
 function routeTo(start: FloorPoint, destination: FloorPoint, dogRadius: number, ball?: FloorPoint) {
   const clear = (from: FloorPoint, to: FloorPoint) =>
     clearsRoomProps(from, to, dogRadius) && (!ball || clearsBall(from, to, ball));
   if (clear(start, destination)) return [destination];
-  for (const turn of [rug, { x: 0, z: -0.52 }, { x: 0, z: 0.91 }]) {
+  for (const turn of routeTurns) {
     if (clear(start, turn) && clear(turn, destination)) return [turn, destination];
   }
   return null;
@@ -73,8 +83,7 @@ export function planMeal(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
 }
 
 export function planCall(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
-  for (const z of [1.12, 0.74, 0.42]) {
-    const stop = { x: 0, z };
+  for (const stop of [{ x: -0.56, z: 1.6 }, { x: -0.55, z: 1.1 }, dogHome]) {
     const route = routeTo(start, stop, dogClearance, ball);
     if (route) return { route, heading: 0 };
   }
@@ -82,7 +91,7 @@ export function planCall(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
 }
 
 export function planNap(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
-  for (const stop of [{ x: 0.35, z: -0.17 }, { x: 0, z: -0.58 }]) {
+  for (const stop of [{ x: 2.47, z: -1.86 }, { x: 1.86, z: -2.53 }]) {
     // The lying pose extends farther than a normal step.
     if (Math.hypot(stop.x - ball.x, stop.z - ball.z) < 1.49) continue;
     const route = routeTo(start, stop, dogClearance, ball);
@@ -92,8 +101,7 @@ export function planNap(start: FloorPoint, ball: FloorPoint): WalkPlan | null {
 }
 
 export function hasRoomToRun(position: FloorPoint, ball: FloorPoint) {
-  return Math.hypot(position.x - rug.x, position.z - rug.z) <= rug.radius - runClearance &&
-    clearsRoomProps(position, position, runClearance) &&
+  return clearsRoomProps(position, position, runClearance) &&
     Math.hypot(position.x - ball.x, position.z - ball.z) >= runClearance + ballStart.radius;
 }
 
@@ -116,7 +124,7 @@ function fetchStop(ball: FloorPoint, heading: number) {
   };
 }
 
-const alternateLandings = [{ x: -1.45, z: -0.5 }, { x: 1.45, z: 0.22 }, { x: 0, z: 1.85 }, { x: 1.48, z: -0.29 }];
+const alternateLandings = [{ x: -2.3, z: -2.15 }, { x: 2.5, z: -1.43 }, { x: 0.8, z: -4.55 }, { x: 2.56, z: 1.84 }];
 const deliveryStop = fetchStop(ballStart, Math.PI / 3);
 
 export type FetchPlan = {
@@ -129,10 +137,9 @@ export type FetchPlan = {
 export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null {
   if (!clearsRoomProps(ball, ball, ballStart.radius)) return null;
   const direct = Math.atan2(ball.x - start.x, ball.z - start.z);
-  const outward = Math.atan2(ball.x - rug.x, ball.z - rug.z);
+  const outward = Math.atan2(ball.x, ball.z + 1.2);
   for (const heading of [direct, outward, outward - 0.55, outward + 0.55, outward - 1.05, outward + 1.05]) {
     const pickup = fetchStop(ball, heading);
-    if (Math.hypot(pickup.approach.x - rug.x, pickup.approach.z - rug.z) > walkRadius) continue;
     const outbound = routeTo(start, pickup.approach, runClearance);
     const homeward = routeTo(pickup.approach, deliveryStop.approach, dogClearance);
     if (outbound && homeward) return { pickup, delivery: deliveryStop, outbound, homeward };
@@ -141,7 +148,7 @@ export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null
 }
 
 export function chooseBallLanding(start: FloorPoint, from: FloorPoint, aim: FloorPoint): FloorPoint | undefined {
-  const limit = rug.radius - ballStart.radius - 0.1;
+  const margin = ballStart.radius + 0.22;
   const candidates: FloorPoint[] = [...alternateLandings];
   const dx = aim.x - from.x;
   const dz = aim.z - from.z;
@@ -151,10 +158,12 @@ export function chooseBallLanding(start: FloorPoint, from: FloorPoint, aim: Floo
     for (let i = 0; i < 9; i++) {
       const angle = i * Math.PI / 4;
       const offset = i === 8 ? 0 : 0.42;
-      const x = from.x + dx * fraction + offset * Math.sin(angle) - rug.x;
-      const z = from.z + dz * fraction + offset * Math.cos(angle) - rug.z;
-      const scale = Math.min(1, limit / Math.hypot(x, z));
-      candidates.push({ x: rug.x + x * scale, z: rug.z + z * scale });
+      const x = from.x + dx * fraction + offset * Math.sin(angle);
+      const z = from.z + dz * fraction + offset * Math.cos(angle);
+      candidates.push({
+        x: Math.max(roomBounds.minX + margin, Math.min(roomBounds.maxX - margin, x)),
+        z: Math.max(roomBounds.minZ + margin, Math.min(roomBounds.maxZ - margin, z)),
+      });
     }
   }
   const distance = (point: FloorPoint) => Math.hypot(point.x - aim.x, point.z - aim.z);
@@ -167,32 +176,15 @@ export function chooseBallLanding(start: FloorPoint, from: FloorPoint, aim: Floo
   });
 }
 
-export function chooseWalkTarget(
-  start: FloorPoint,
-  ball: FloorPoint,
-  cameraZ: number,
-  viewWidthPerDepth: number,
-): FloorPoint | null {
-  const backZ = rug.z - walkRadius;
-  let nearbyTarget: FloorPoint | null = null;
-  let farthestNearby = 0.4;
+export function chooseWalkTarget(start: FloorPoint, ball: FloorPoint): FloorPoint | null {
   for (let attempt = 0; attempt < 40; attempt++) {
-    const z = backZ + Math.random() * (0.74 - backZ);
-    const rugHalfWidth = Math.sqrt(walkRadius ** 2 - (z - rug.z) ** 2);
-    // Keep the full dog in the fixed camera's view as it turns.
-    const viewHalfWidth = (cameraZ - z) * viewWidthPerDepth - 1.35;
-    const halfWidth = Math.min(rugHalfWidth, viewHalfWidth);
-    if (halfWidth <= 0) continue;
-
-    const target = { x: rug.x + (2 * Math.random() - 1) * halfWidth, z };
-    const distance = Math.hypot(target.x - start.x, target.z - start.z);
-    if (distance <= farthestNearby) continue;
+    const distance = 0.75 + Math.random() * 2.4;
+    const heading = Math.random() * 2 * Math.PI;
+    const target = { x: start.x + Math.sin(heading) * distance, z: start.z + Math.cos(heading) * distance };
     if (!clearsRoomProps(start, target, dogClearance)) continue;
     if (!clearsBall(start, target, ball)) continue;
 
-    if (distance >= 0.75) return target;
-    nearbyTarget = target;
-    farthestNearby = distance;
+    return target;
   }
-  return nearbyTarget;
+  return null;
 }

@@ -1,5 +1,5 @@
 import { Box3, Matrix4, Mesh, Vector3, type Group, type SkinnedMesh } from "three";
-import { rugSurface } from "./roomNavigation";
+import { floorSurface } from "./roomNavigation";
 
 const gridSize = 64;
 const clearance = 0.006;
@@ -120,7 +120,7 @@ export function createHandClearance(hand: Group, comb: Group) {
     for (const skin of activeSurfaces) fillDepth(handDepth, skin, bounds, -1);
     fillDepth(dogDepth, dogSurface, bounds, 1);
 
-    let shift = outward.y > 0 ? Math.max(0, (rugSurface + clearance - handBottom) / outward.y) : 0;
+    let shift = outward.y > 0 ? Math.max(0, (floorSurface + clearance - handBottom) / outward.y) : 0;
     for (let cell = 0; cell < dogDepth.length; cell++) {
       shift = Math.max(shift, dogDepth[cell] + handDepth[cell] + clearance);
     }

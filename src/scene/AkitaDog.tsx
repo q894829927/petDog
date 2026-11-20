@@ -14,7 +14,6 @@ import {
   Vector3,
   type AnimationAction,
   type Group,
-  type PerspectiveCamera,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import akitaHighUrl from "../assets/akita-high.glb?url";
@@ -31,12 +30,13 @@ import {
   canReclineAt,
   chooseWalkTarget,
   clearsBall,
+  dogHome,
+  floorSurface,
   hasRoomToRun,
   planCall,
   planFetch,
   planMeal,
   planNap,
-  rugSurface,
   type FetchPlan,
   type FloorPoint,
   type WalkPlan,
@@ -625,9 +625,7 @@ export function AkitaDog({ ball, dog, handContact }: {
           return;
         }
       }
-      const halfFov = MathUtils.degToRad((camera as PerspectiveCamera).fov / 2);
-      const viewWidthPerDepth = Math.tan(halfFov) * size.width / size.height;
-      activity.target = chooseWalkTarget(group.position, ballPosition, camera.position.z, viewWidthPerDepth);
+      activity.target = chooseWalkTarget(group.position, ballPosition);
       if (activity.target) play("Walk");
       else rest();
       return;
@@ -803,7 +801,7 @@ export function AkitaDog({ ball, dog, handContact }: {
     <group
       name="Akita"
       ref={dog}
-      position={[0.12, rugSurface, 0.35]}
+      position={[dogHome.x, floorSurface, dogHome.z]}
       rotation={[0, -0.65, 0]}
       scale={dogScale}
       onPointerDown={pointerDown}

@@ -3,13 +3,14 @@ import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { MathUtils, Plane, Raycaster, Vector2, Vector3, type Group, type Mesh } from "three";
 import { useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI } from "../store/useGameUI";
-import { ballGroundY, ballStart, chooseBallLanding, type FloorPoint } from "./roomNavigation";
+import { ballGroundY, ballStart, chooseBallLanding, roomBounds, type FloorPoint } from "./roomNavigation";
 
 type BallGrab = {
   phase: "held";
   pointer: number;
   origin: Vector3;
   goal: Vector3;
+  plane: Plane;
   offset: Vector2;
   downX: number;
   downY: number;
@@ -32,7 +33,6 @@ export type BallState = {
   motion: { phase: "rest" } | { phase: "fetch"; owner: number | null } | BallGrab | BallFlight;
 };
 
-const handPlane = new Plane(new Vector3(0, 0, 1), -2.36);
 export const ballGripCloseTime = 0.14;
 
 export function ballFloorPoint({ mesh, motion }: BallState): FloorPoint {
@@ -99,7 +99,7 @@ export function TennisBall({ ball, dog }: {
 
   const moveHeldBall = (event: ThreeEvent<PointerEvent>, grab: BallGrab) => {
     ray.setFromCamera(pointer.copy(event.pointer).add(grab.offset), camera);
-    ray.ray.intersectPlane(handPlane, grab.goal);
+    ray.ray.intersectPlane(grab.plane, grab.goal);
     grab.goal.y = MathUtils.clamp(grab.goal.y + 0.23, 0.45, 2.8);
   };
 
@@ -115,6 +115,7 @@ export function TennisBall({ ball, dog }: {
       pointer: event.pointerId,
       origin: toy.position.clone(),
       goal: toy.position.clone(),
+      plane: new Plane(new Vector3(0, 0, 1), -Math.min(roomBounds.maxZ - 0.3, Math.max(ballStart.z + 1.4, toy.position.z + 0.55))),
       offset: new Vector2(center.x, center.y).sub(event.pointer),
       downX: event.clientX,
       downY: event.clientY,
@@ -159,7 +160,7 @@ export function TennisBall({ ball, dog }: {
     }
 
     const power = MathUtils.smoothstep(distance, minimum, Math.min(size.width, size.height) * 0.33);
-    const range = MathUtils.lerp(0.82, 4.4, power);
+    const range = MathUtils.lerp(0.86, 6.2, power);
     const aim = { x: grab.origin.x + range * dx / distance, z: grab.origin.z + range * dy / distance };
     const landing = chooseBallLanding(dog.current.position, grab.origin, aim);
     if (!landing) {
