@@ -1,18 +1,18 @@
 export type FloorPoint = { x: number; z: number };
 
 export const roomBounds = { minX: -6, maxX: 6, minZ: -6.2, maxZ: 3.8 };
+export const wallThickness = 0.2;
 export const floorSurface = 0.026;
-export const rug = { x: 0, z: 1.26, width: 4.85, depth: 2.85 };
+export const rug = { x: 0, z: 1.26, width: 4.85, depth: 2.85, cornerRadius: 0.44 };
 export const dogHome = { x: -0.36, z: 0.72 };
-export const foodBowl = { x: -3.15, z: 0.47, radius: 0.37 };
-export const dogBed = { x: 3.93, z: -3.67, radius: 0.93 };
-export const windowPlant = { x: 5, z: -5.05, radius: 0.45 };
+export const foodBowl = { x: -3.15, z: 0.47, radius: 0.37, rimRadius: 0.32, height: 0.116 };
+export const dogBed = { x: 3.93, z: -3.67, radius: 0.93, rimHeight: 0.16, rimThickness: 0.19, cushionRadius: 0.79, cushionHeight: 0.055 };
+export const windowPlant = { x: 5, z: -5.05, radius: 0.45, potRadius: 0.27, potHeight: 0.46 };
 export const ballStart = { x: 1.26, z: 1.67, radius: 0.13 };
 export const ballGroundY = floorSurface + ballStart.radius;
 
 // The scaled Akita reaches 1.24 units from its center near the floor.
 const dogClearance = 1.25;
-const ballClearance = dogClearance + ballStart.radius;
 // The running clip reaches 1.36 units near the floor.
 const runClearance = 1.38;
 const roomProps = [foodBowl, dogBed, windowPlant];
@@ -124,7 +124,6 @@ function fetchStop(ball: FloorPoint, heading: number) {
   };
 }
 
-const alternateLandings = [{ x: -2.3, z: -2.15 }, { x: 2.5, z: -1.43 }, { x: 0.8, z: -4.55 }, { x: 2.56, z: 1.84 }];
 const deliveryStop = fetchStop(ballStart, Math.PI / 3);
 
 export type FetchPlan = {
@@ -145,35 +144,6 @@ export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null
     if (outbound && homeward) return { pickup, delivery: deliveryStop, outbound, homeward };
   }
   return null;
-}
-
-export function chooseBallLanding(start: FloorPoint, from: FloorPoint, aim: FloorPoint): FloorPoint | undefined {
-  const margin = ballStart.radius + 0.22;
-  const candidates: FloorPoint[] = [...alternateLandings];
-  const dx = aim.x - from.x;
-  const dz = aim.z - from.z;
-  const range = Math.hypot(dx, dz);
-  // A blocked aim can shorten the throw or shift it to one side within the same direction.
-  for (const fraction of [1, 0.75, 0.5, 0.25]) {
-    for (let i = 0; i < 9; i++) {
-      const angle = i * Math.PI / 4;
-      const offset = i === 8 ? 0 : 0.42;
-      const x = from.x + dx * fraction + offset * Math.sin(angle);
-      const z = from.z + dz * fraction + offset * Math.cos(angle);
-      candidates.push({
-        x: Math.max(roomBounds.minX + margin, Math.min(roomBounds.maxX - margin, x)),
-        z: Math.max(roomBounds.minZ + margin, Math.min(roomBounds.maxZ - margin, z)),
-      });
-    }
-  }
-  const distance = (point: FloorPoint) => Math.hypot(point.x - aim.x, point.z - aim.z);
-  return candidates.sort((a, b) => distance(a) - distance(b)).find((point) => {
-    const x = point.x - from.x;
-    const z = point.z - from.z;
-    const travel = Math.hypot(x, z);
-    return travel >= 0.3 && x * dx + z * dz >= 0.43 * range * travel &&
-      Math.hypot(point.x - start.x, point.z - start.z) >= ballClearance && planFetch(start, point);
-  });
 }
 
 export function chooseWalkTarget(start: FloorPoint, ball: FloorPoint): FloorPoint | null {

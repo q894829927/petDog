@@ -24,7 +24,7 @@ import { createPetReactions } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
-import { ballFloorPoint, type BallState } from "./TennisBall";
+import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
 import {
   ballGroundY,
   canReclineAt,
@@ -295,10 +295,10 @@ export function AkitaDog({ ball, dog, handContact }: {
         useGameUI.getState().setNotice("团子有点累，休息一会儿再玩球。");
         return;
       }
-      const plan = planFetch(group.position, toy.position);
+      const plan = toy.position.y === ballGroundY && planFetch(group.position, toy.position);
       if (!plan) {
         sceneBall.motion = { phase: "rest" };
-        useGameUI.getState().setNotice("团子在等球周围空出一点地方。");
+        useGameUI.getState().setNotice("球停在团子够不到的地方了。");
         return;
       }
       fetch.current = { plan, owner: sceneBall.motion.owner, phase: "chase", waypoint: 0 };
@@ -334,8 +334,7 @@ export function AkitaDog({ ball, dog, handContact }: {
     }
 
     if (fetch.current) {
-      if (toy) toy.position.y = ballGroundY;
-      sceneBall.motion = { phase: "rest" };
+      dropBall(sceneBall);
       fetch.current = null;
     }
     roaming.current.target = null;
@@ -629,6 +628,11 @@ export function AkitaDog({ ball, dog, handContact }: {
       return;
     }
     const activity = roaming.current;
+    const ballMotion = ball.current.motion;
+    if (ballMotion.phase === "flight" && ballMotion.play?.sequence === (interaction?.sequence ?? 0)) {
+      if (clip === "Walk") rest();
+      return;
+    }
     const ballPosition = ballFloorPoint(ball.current);
     if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
     if (clip === "Idle") {

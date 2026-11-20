@@ -9,7 +9,7 @@ import playerHandUrl from "../assets/player-hand.glb?url";
 import { useGameUI, type PetPart } from "../store/useGameUI";
 import { createHandClearance } from "./handClearance";
 import { hitPetTarget, samplePetSurface, type PetSurface } from "./petTouch";
-import { ballGripCloseTime, type BallState } from "./TennisBall";
+import { ballGripCloseTime, ballPutBackTime, type BallState } from "./TennisBall";
 
 export type HandGesture = PetPart | "brush";
 
@@ -187,9 +187,10 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     const blend = 1 - Math.exp(-step * 24);
     const { mesh: toy, hovered, motion } = ball.current;
     const holdingBall = motion.phase === "held";
+    const puttingBack = motion.phase === "putBack";
     const toss = motion.phase === "flight" && motion.play && motion.elapsed < 0.26 ? motion : null;
     const gripTime = holdingBall ? motion.elapsed : toss && toss.elapsed < 0 ? toss.elapsed + ballGripCloseTime : null;
-    const ballPoint = disabled || (!holdingBall && !toss && !hovered) ? null : toss?.from ?? toy?.position;
+    const ballPoint = disabled || (!holdingBall && !puttingBack && !toss && !hovered) ? null : toss?.from ?? toy?.position;
     if (ballPoint || (pose.onBall && !target && !appearing)) {
       if (!pose.onBall) {
         pose.lastContact = null;
@@ -199,7 +200,7 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       }
       pose.onBall = true;
       if (ballPoint) {
-        pose.point.lerp(ballPoint, appearing || holdingBall || toss ? 1 : blend);
+        pose.point.lerp(ballPoint, appearing || holdingBall || puttingBack || toss ? 1 : blend);
         pose.missedFor = 0;
       } else {
         pose.missedFor += step;
@@ -224,6 +225,9 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       pose.ballGrip = ballPoint && gripTime !== null
         ? MathUtils.smoothstep(gripTime, 0.015, ballGripCloseTime)
         : MathUtils.damp(pose.ballGrip, 0, toss ? 33 : 24, step);
+      if (puttingBack && ballPoint) {
+        pose.ballGrip = 1 - MathUtils.smoothstep(motion.elapsed, ballPutBackTime * 0.64, ballPutBackTime);
+      }
       for (let finger = 0; finger < pose.curl.length; finger++) {
         const open = restCurls[finger] + 0.07 * (1 - followThrough);
         pose.curl[finger] = MathUtils.lerp(pose.curl[finger], open, appearing ? 1 : blend);
@@ -235,8 +239,7 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       pose.goal.copy(pose.point).addScaledVector(pose.z, 0.155 * (1 - pose.ballGrip) + retreat);
       if (toss) {
         const release = Math.max(0, toss.elapsed);
-        pose.forward.subVectors(toss.to, toss.from).setY(0).normalize();
-        pose.goal.addScaledVector(pose.forward, 0.27 * followThrough);
+        pose.goal.addScaledVector(toss.direction, 0.27 * followThrough);
         pose.goal.addScaledVector(pose.z, 0.08 * (1 - pose.ballGrip));
         pose.goal.y += 0.52 * (1 - Math.exp(-release * 15));
       }

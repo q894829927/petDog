@@ -78,7 +78,7 @@ function StageCamera({ ball, dog, contact }: {
   useFrame((_, delta) => {
     const sceneBall = ball.current;
     const { motion } = sceneBall;
-    if (motion.phase === "held" || contact.current?.pressed) return;
+    if (motion.phase === "held" || motion.phase === "putBack" || contact.current?.pressed) return;
 
     const pet = dog.current?.position ?? dogHome;
     const offsetX = pet.x - 0.12;
@@ -88,13 +88,14 @@ function StageCamera({ ball, dog, contact }: {
     let eyeZ = distance + 0.42 + depth;
     let lookY = 1.04;
 
+    const target = motion.phase === "flight" ? motion.prediction.farthest : ballFloorPoint(sceneBall);
+    const far = target.z < -2.15 || Math.abs(target.x - pet.x) > (portrait ? 2.05 : 3.25);
     if (motion.phase === "flight" && motion.play) {
-      wideShot.current = motion.to.z < -2.15 || Math.abs(motion.to.x - pet.x) > (portrait ? 2.05 : 3.25);
-    } else if (motion.phase !== "fetch") {
+      wideShot.current = far;
+    } else if (motion.phase === "rest" && !far) {
       wideShot.current = false;
     }
     if (wideShot.current) {
-      const target = ballFloorPoint(sceneBall);
       x = (pet.x + target.x) / 2;
       depth = MathUtils.clamp(Math.min(pet.z, target.z) * 0.36, -1.66, 0);
       height += 1.22;

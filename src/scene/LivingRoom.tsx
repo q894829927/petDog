@@ -5,7 +5,7 @@ import floorColorUrl from "../assets/living-room-floor.webp?url";
 import floorNormalUrl from "../assets/living-room-floor-normal.webp?url";
 import windowViewUrl from "../assets/living-room-view.webp?url";
 import { useGameUI } from "../store/useGameUI";
-import { dogBed, floorSurface, foodBowl, roomBounds, rug, windowPlant } from "./roomNavigation";
+import { dogBed, floorSurface, foodBowl, roomBounds, rug, wallThickness, windowPlant } from "./roomNavigation";
 
 const width = roomBounds.maxX - roomBounds.minX;
 const depth = roomBounds.maxZ - roomBounds.minZ;
@@ -14,7 +14,7 @@ const windowOpening = { left: -2.12, right: 4.95, bottom: 0.48, top: 3.63 };
 const plaster = "#ece4d4";
 const trim = "#b79b77";
 const bowlProfile = [
-  [0, 0], [0.26, 0], [0.32, 0.11], [0.31, 0.116],
+  [0, 0], [0.26, 0], [foodBowl.rimRadius, 0.11], [0.31, foodBowl.height],
   [0.29, 0.11], [0.246, 0.047], [0, 0.047],
 ].map(([x, y]) => new Vector2(x, y));
 
@@ -49,7 +49,7 @@ function roundedMat(width: number, depth: number, radius: number) {
 
 function InteractionRug() {
   const { border, center } = useMemo(() => ({
-    border: roundedMat(rug.width, rug.depth, 0.44),
+    border: roundedMat(rug.width, rug.depth, rug.cornerRadius),
     center: roundedMat(rug.width - 0.18, rug.depth - 0.18, 0.34),
   }), []);
   // The material offsets draw the rug above the wood without moving the shared floor surface.
@@ -104,10 +104,10 @@ function PictureWindow({ view }: { view: Texture }) {
   const z = roomBounds.minZ;
   return (
     <group name="Picture window">
-      <RoomBox position={[(roomBounds.minX + left) / 2, wallHeight / 2, z]} size={[left - roomBounds.minX, wallHeight, 0.2]} color={plaster} />
-      <RoomBox position={[(roomBounds.maxX + right) / 2, wallHeight / 2, z]} size={[roomBounds.maxX - right, wallHeight, 0.2]} color={plaster} />
-      <RoomBox position={[x, bottom / 2, z]} size={[w, bottom, 0.2]} color={plaster} />
-      <RoomBox position={[x, (top + wallHeight) / 2, z]} size={[w, wallHeight - top, 0.2]} color={plaster} />
+      <RoomBox position={[(roomBounds.minX + left) / 2, wallHeight / 2, z]} size={[left - roomBounds.minX, wallHeight, wallThickness]} color={plaster} />
+      <RoomBox position={[(roomBounds.maxX + right) / 2, wallHeight / 2, z]} size={[roomBounds.maxX - right, wallHeight, wallThickness]} color={plaster} />
+      <RoomBox position={[x, bottom / 2, z]} size={[w, bottom, wallThickness]} color={plaster} />
+      <RoomBox position={[x, (top + wallHeight) / 2, z]} size={[w, wallHeight - top, wallThickness]} color={plaster} />
       <mesh position={[x, y, z - 0.19]}>
         <planeGeometry args={[w + 0.6, h + 0.44]} />
         <meshBasicMaterial map={view} toneMapped={false} />
@@ -124,8 +124,8 @@ function PictureWindow({ view }: { view: Texture }) {
 function WindowPlant() {
   return (
     <group name="Window plant" position={[windowPlant.x, floorSurface, windowPlant.z]}>
-      <mesh position-y={0.23} castShadow receiveShadow>
-        <cylinderGeometry args={[0.27, 0.19, 0.46, 28]} />
+      <mesh position-y={windowPlant.potHeight / 2} castShadow receiveShadow>
+        <cylinderGeometry args={[windowPlant.potRadius, 0.19, windowPlant.potHeight, 28]} />
         <meshStandardMaterial color="#b58567" roughness={0.93} />
       </mesh>
       <mesh position-y={0.74} castShadow>
@@ -177,20 +177,20 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
           <meshStandardMaterial color="#dbe0eb" map={floorColor} normalMap={shadows ? floorNormal : null}
             normalScale={[0.37, 0.37]} roughness={0.8} />
         </mesh>
-        <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color="#e2d7c4" />
-        <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[0.2, wallHeight, depth]} color={plaster} />
+        <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color="#e2d7c4" />
+        <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color={plaster} />
         <RoomBox position={[0, floorSurface + 0.065, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
         <PictureWindow view={view} />
         <WindowPlant />
         <InteractionRug />
         <FoodBowl />
         <group name="Dog bed" position={[dogBed.x, floorSurface, dogBed.z]}>
-          <mesh position-y={0.16} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-            <torusGeometry args={[dogBed.radius - 0.19, 0.19, 16, 56]} />
+          <mesh position-y={dogBed.rimHeight} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
+            <torusGeometry args={[dogBed.radius - dogBed.rimThickness, dogBed.rimThickness, 16, 56]} />
             <meshStandardMaterial color="#9e7e6e" roughness={0.98} />
           </mesh>
-          <mesh position-y={0.0275} castShadow receiveShadow>
-            <cylinderGeometry args={[dogBed.radius - 0.14, dogBed.radius - 0.14, 0.055, 48]} />
+          <mesh position-y={dogBed.cushionHeight / 2} castShadow receiveShadow>
+            <cylinderGeometry args={[dogBed.cushionRadius, dogBed.cushionRadius, dogBed.cushionHeight, 48]} />
             <meshStandardMaterial color="#d7bc9f" roughness={1} />
           </mesh>
         </group>
