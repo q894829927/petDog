@@ -21,7 +21,7 @@ import { createPetReactions, isTailPart } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
 import { createAkitaFootsteps } from "./akitaFootsteps";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
-import { playAkitaPant } from "./roomAudio";
+import { maybePlayAkitaBark, playAkitaPant } from "./roomAudio";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
 import { useAkitaModel } from "./useAkitaModel";
@@ -174,7 +174,7 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
   const reactions = useMemo(() => {
     const lookAround = AnimationClip.findByName(assetClips, "LookAround");
     if (!lookAround) throw new Error("Akita animation missing: LookAround");
-    return createPetReactions(mixer, lookAround);
+    return createPetReactions(mixer, lookAround, maybePlayAkitaBark);
   }, [assetClips, mixer]);
   const head = useMemo(() => {
     const bone = scene.getObjectByName("head");

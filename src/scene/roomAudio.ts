@@ -1,3 +1,4 @@
+import akitaBarkUrl from "../assets/akita-bark.mp3?inline";
 import akitaPantUrl from "../assets/akita-pant.mp3?inline";
 import bounceUrl from "../assets/ball-bounce.wav?inline";
 import pawWoodUrl from "../assets/paw-wood.wav?inline";
@@ -5,11 +6,19 @@ import pawCarpetUrl from "../assets/paw-carpet.wav?inline";
 import { useGameUI } from "../store/useGameUI";
 import type { FloorMaterial } from "./roomNavigation";
 
-const clips = { bounce: bounceUrl, wood: pawWoodUrl, carpet: pawCarpetUrl, akitaPant: akitaPantUrl };
+const clips = {
+  bounce: bounceUrl,
+  wood: pawWoodUrl,
+  carpet: pawCarpetUrl,
+  akitaPant: akitaPantUrl,
+  akitaBark: akitaBarkUrl,
+};
 type Clip = keyof typeof clips;
 const buffers = new Map<Clip, AudioBuffer>();
 let context: AudioContext | undefined;
 let output: GainNode | undefined;
+let pantEndsAt = 0;
+let nextBarkAt = 0;
 
 export function unlockRoomAudio() {
   if (typeof AudioContext === "undefined") return;
@@ -58,6 +67,7 @@ function playSound(clip: Clip, volume: number, rate: number, lowpass?: number) {
     gain.disconnect();
   };
   source.start();
+  return context.currentTime + buffer.duration / rate;
 }
 
 export function playBallBounce(speed: number, surface: FloorMaterial) {
@@ -74,5 +84,12 @@ export function playPawStep(surface: FloorMaterial, intensity: number) {
 }
 
 export function playAkitaPant() {
-  playSound("akitaPant", 0.24, 0.96 + Math.random() * 0.08);
+  const endsAt = playSound("akitaPant", 0.24, 0.96 + Math.random() * 0.08);
+  if (endsAt !== undefined) pantEndsAt = endsAt;
+}
+
+export function maybePlayAkitaBark() {
+  if (!context || context.currentTime < Math.max(pantEndsAt, nextBarkAt) || Math.random() >= 0.25) return;
+  const endsAt = playSound("akitaBark", 0.14, 0.93 + Math.random() * 0.09);
+  if (endsAt !== undefined) nextBarkAt = endsAt + 45 + Math.random() * 20;
 }

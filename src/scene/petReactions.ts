@@ -34,9 +34,10 @@ export function isTailPart(part: string | undefined) {
 
 type TailMood = Pick<PetSnapshot, "happiness" | "personality" | "sleeping">;
 const happyThreshold = 65;
+const barkThreshold = 75;
 const wagPace: Record<Personality, number> = { playful: 1.16, affectionate: 1, reserved: 0.79 };
 
-function createHappyTailWag(mixer: AnimationMixer) {
+function createHappyTailWag(mixer: AnimationMixer, onHappyWag: () => void) {
   // Express the dog's front-to-back axis in the local bases of the curled tail bones.
   const swingAxis = new Vector3(0, 0.86, 0.5).normalize();
   const followAxis = new Vector3(0.2, 0.02, -0.98).normalize();
@@ -64,6 +65,7 @@ function createHappyTailWag(mixer: AnimationMixer) {
     const strength = MathUtils.randFloat(0.62, 0.98) * MathUtils.lerp(0.82, 1, mood);
     active = wags[variation].reset().setDuration(duration).setEffectiveWeight(strength).fadeIn(0.12).play();
     wait = MathUtils.randFloat(3.7, 7.6);
+    if (happiness >= barkThreshold) onHappyWag();
   };
 }
 
@@ -125,9 +127,9 @@ function makeClip({ part, side = "L", hind }: PetTarget, lookAround: AnimationCl
   }
 }
 
-export function createPetReactions(mixer: AnimationMixer, lookAround: AnimationClip) {
+export function createPetReactions(mixer: AnimationMixer, lookAround: AnimationClip, onHappyWag: () => void) {
   const actions = new Map<string, AnimationAction>();
-  const wag = createHappyTailWag(mixer);
+  const wag = createHappyTailWag(mixer, onHappyWag);
   let current: AnimationAction | null = null;
 
   return {
