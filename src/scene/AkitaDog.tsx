@@ -19,6 +19,7 @@ import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions, isTailPart } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
+import { createAkitaFootsteps } from "./akitaFootsteps";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
@@ -186,6 +187,7 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
   }, [scene]);
   const rig = useRef<Group>(null);
   const idleHeight = useMemo(() => createIdleGrounding(skin), [skin]);
+  const footsteps = useMemo(() => createAkitaFootsteps(skin.skeleton), [skin]);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
@@ -495,6 +497,7 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
 
     const toy = ball.current.mesh;
     const clip = action.getClip().name;
+    footsteps(action, group.position, step);
     const body = rig.current;
     if (body && !recline.current) {
       const height = clip === "Idle" ? idleHeight(body) : 0;
