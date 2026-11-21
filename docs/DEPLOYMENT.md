@@ -40,6 +40,8 @@ Game-Portal 当前的自动发布工具适用于公开静态 HTML 和 Vite 项�
 
 仓库已包含前端 Vite 构建和 GitHub Actions 发布工作流。构建输出为根目录 dist，Vite base 固定为 /games/petdog/。工作流只发布静态产物，不包含后端源码、数据库或环境配置。
 
+发布工作流为至少 1 KB 的 JS、CSS 和 GLB 生成并校验同名 `.gz`，原文件一同发布。ECS 的 `/etc/nginx/snippets/game-portal-managed-petdog.conf` 在 `location ^~ /games/petdog/` 内配置 `gzip_static on;` 和 `gzip_vary on;`。重新安装该站点路由时也须添加这两项，再执行 `nginx -t` 与 `systemctl reload nginx`。验收时分别带 `Accept-Encoding: gzip` 和 `Accept-Encoding: identity` 请求当前版本的同一个资源，检查前者返回 `Content-Encoding: gzip` 和 `Vary: Accept-Encoding`，且解压后与后者一致。
+
 首次在 ECS 安装：
 
 ```bash

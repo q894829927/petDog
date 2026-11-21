@@ -37,6 +37,8 @@ jobs:
           VITE_BUILD_SHA="$GITHUB_SHA" npm run build
           test -s dist/index.html
           grep -Fq "/games/petdog/" dist/index.html
+          find dist -type f -size +1023c \( -name '*.js' -o -name '*.css' -o -name '*.glb' \) -exec gzip -9 -n -k -- {} +
+          find dist -name '*.gz' -exec gzip -t -- {} +
 
       - name: Publish current main build to site
         shell: bash
