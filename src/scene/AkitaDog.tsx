@@ -21,6 +21,7 @@ import { createPetReactions, isTailPart } from "./petReactions";
 import { hitPetTarget } from "./petTouch";
 import { createAkitaFootsteps } from "./akitaFootsteps";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
+import { playAkitaPant } from "./roomAudio";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
 import { useAkitaModel } from "./useAkitaModel";
@@ -455,6 +456,7 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
         ball.current.motion = { phase: "rest" };
         rest();
         useGameUI.getState().setNotice("团子把球叼回来了！");
+        playAkitaPant();
         recordPetAction("play", trip.owner);
       }
       return;
