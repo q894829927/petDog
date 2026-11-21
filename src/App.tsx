@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { refreshCloud, useCloudPet } from "./cloud/useCloudPet";
 import { PetWorld } from "./scene/PetWorld";
+import { unlockRoomAudio } from "./scene/roomAudio";
 import { GameHUD } from "./ui/GameHUD";
 
 export default function App() {
@@ -17,7 +18,7 @@ export default function App() {
   }, []);
 
   return (
-    <main className="game-shell" aria-label="倩岚汪宠物房间">
+    <main className="game-shell" aria-label="倩岚汪宠物房间" onPointerUpCapture={unlockRoomAudio} onKeyDownCapture={unlockRoomAudio}>
       <PetWorld />
       <GameHUD />
     </main>

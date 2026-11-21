@@ -116,6 +116,7 @@ button.icon-button { border: 1px solid var(--border); }
 .profile-grid strong { color: #5f7154; font-size: 15px; }
 .modal-note { margin: 20px 0 0; font-size: 12px; line-height: 1.9; color: #8b7a67; }
 .setting-label { margin: 0 0 12px; font-size: 13px; font-weight: 700; }
+.settings-content .modal-note + .setting-label { margin-top: 20px; }
 .segmented { display: flex; gap: 8px; padding: 5px; background: #f0eadd; border-radius: 14px; }
 .segmented button { flex: 1; border: 0; border-radius: 10px; padding: 12px; background: transparent; font-size: 12px; }
 .segmented button.selected { background: var(--green); color: white; }

@@ -1,4 +1,5 @@
 export type FloorPoint = { x: number; z: number };
+export type FloorMaterial = "wood" | "carpet";
 
 export const roomBounds = { minX: -6, maxX: 6, minZ: -6.2, maxZ: 3.8 };
 export const wallThickness = 0.2;
@@ -10,6 +11,12 @@ export const dogBed = { x: 3.93, z: -3.67, radius: 0.93, rimHeight: 0.16, rimThi
 export const windowPlant = { x: 5, z: -5.05, radius: 0.45, potRadius: 0.27, potHeight: 0.46 };
 export const ballStart = { x: 1.26, z: 1.67, radius: 0.13 };
 export const ballGroundY = floorSurface + ballStart.radius;
+
+export function floorMaterialAt({ x, z }: FloorPoint): FloorMaterial {
+  const dx = Math.max(0, Math.abs(x - rug.x) - rug.width / 2 + rug.cornerRadius);
+  const dz = Math.max(0, Math.abs(z - rug.z) - rug.depth / 2 + rug.cornerRadius);
+  return dx * dx + dz * dz <= rug.cornerRadius ** 2 ? "carpet" : "wood";
+}
 
 // The scaled Akita reaches 1.24 units from its center near the floor.
 const dogClearance = 1.25;

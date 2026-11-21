@@ -83,6 +83,8 @@ function DetailsPanel() {
   const setPanel = useGameUI((state) => state.setPanel);
   const quality = useGameUI((state) => state.quality);
   const setQuality = useGameUI((state) => state.setQuality);
+  const sound = useGameUI((state) => state.soundEnabled);
+  const setSound = useGameUI((state) => state.setSoundEnabled);
   const pet = useCloudPet((state) => state.pet);
   const name = pet?.name ?? "团子";
   if (!panel) return null;
@@ -113,6 +115,11 @@ function DetailsPanel() {
               <button type="button" className={quality === "low" ? "selected" : ""} aria-pressed={quality === "low"} onClick={() => setQuality("low")}>省电</button>
             </div>
             <p className="modal-note">标准使用高模和阴影。省电使用低模、降低渲染精度并关闭阴影。</p>
+            <p className="setting-label">场景音效</p>
+            <div className="segmented" role="group" aria-label="场景音效">
+              <button type="button" className={sound ? "selected" : ""} aria-pressed={sound} onClick={() => setSound(true)}>开启</button>
+              <button type="button" className={sound ? "" : "selected"} aria-pressed={!sound} onClick={() => setSound(false)}>静音</button>
+            </div>
             <a href="/" className="settings-back"><Icon name="back" size={17}/> 返回游戏大厅</a>
           </div>
         )}

@@ -5,6 +5,7 @@ import { useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI } from "../store/useGameUI";
 import { ballBounds, ballPhysicsStep, planBallThrow, predictBallPath, stepBall, type BallBody } from "./ballPhysics";
 import { ballGroundY, ballStart, roomBounds, type FloorPoint } from "./roomNavigation";
+import { playBallBounce } from "./roomAudio";
 
 type BallGrab = {
   phase: "held";
@@ -152,7 +153,7 @@ export function TennisBall({ ball, dog }: {
       motion.accumulator += MathUtils.clamp(motion.elapsed, 0, step);
       while (motion.accumulator >= ballPhysicsStep) {
         motion.accumulator -= ballPhysicsStep;
-        const settled = stepBall(motion.body);
+        const settled = stepBall(motion.body, playBallBounce);
         const next = motion.body.position;
         if (motion.body.rolling) {
           rollAxis.set(next.z - toy.position.z, 0, toy.position.x - next.x);

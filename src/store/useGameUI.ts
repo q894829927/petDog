@@ -19,11 +19,13 @@ type GameUI = {
   interaction: Interaction | null;
   bowl: { kind: MealKind; portions: number } | null;
   quality: "high" | "low";
+  soundEnabled: boolean;
   toggleBrush: () => void;
   toggleFood: () => void;
   setPanel: (panel: ActivePanel) => void;
   setStatDetail: (key: StatKey | null) => void;
   setQuality: (quality: "high" | "low") => void;
+  setSoundEnabled: (soundEnabled: boolean) => void;
   trigger: (kind: InteractionKind, target?: PetTarget) => void;
   setBowl: (kind: MealKind, portions: number) => void;
   setNotice: (notice: string) => void;
@@ -55,11 +57,13 @@ export const useGameUI = create<GameUI>((set) => ({
   interaction: null,
   bowl: null,
   quality: "high",
+  soundEnabled: true,
   toggleBrush: () => set((state) => ({ brushEquipped: !state.brushEquipped, foodOpen: false, statDetail: null })),
   toggleFood: () => set((state) => ({ foodOpen: !state.foodOpen, brushEquipped: false, statDetail: null })),
   setPanel: (panel) => set({ panel, foodOpen: false, statDetail: null }),
   setStatDetail: (statDetail) => set({ statDetail, foodOpen: false }),
   setQuality: (quality) => set({ quality }),
+  setSoundEnabled: (soundEnabled) => set({ soundEnabled }),
   trigger: (kind, target = { part: "head" }) => set((state) => ({
     interaction: { ...target, kind, sequence: (state.interaction?.sequence ?? 0) + 1 },
     notice: kind === "pet" ? petMessages[target.part] : kind === "brush" ? "团子摇摇尾巴，背上的毛梳顺了。" : state.notice,

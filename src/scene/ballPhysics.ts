@@ -1,5 +1,5 @@
 import { MathUtils, type Vector3 } from "three";
-import { ballGroundY, ballStart, dogBed, floorSurface, foodBowl, planFetch, roomBounds, rug, wallThickness, windowPlant, type FloorPoint } from "./roomNavigation";
+import { ballGroundY, ballStart, dogBed, floorMaterialAt, floorSurface, foodBowl, planFetch, roomBounds, wallThickness, windowPlant, type FloorMaterial, type FloorPoint } from "./roomNavigation";
 
 export const ballPhysicsStep = 1 / 120;
 const gravity = 18;
@@ -17,12 +17,6 @@ const wood = { restitution: 0.57, retainedSpeed: 0.75, rollingDrag: 2.45 };
 const carpet = { restitution: 0.37, retainedSpeed: 0.64, rollingDrag: 4.2 };
 
 export type BallBody = { position: Vector3; velocity: Vector3; rolling: boolean };
-
-function surfaceAt({ x, z }: FloorPoint) {
-  const dx = Math.max(0, Math.abs(x - rug.x) - rug.width / 2 + rug.cornerRadius);
-  const dz = Math.max(0, Math.abs(z - rug.z) - rug.depth / 2 + rug.cornerRadius);
-  return dx * dx + dz * dz <= rug.cornerRadius ** 2 ? carpet : wood;
-}
 
 function bounceSpeed(inward: number, restitution: number) {
   const rebound = -inward * restitution;
@@ -95,7 +89,7 @@ function limitAxis(body: BallBody, axis: "x" | "z", min: number, max: number) {
 }
 
 /** Advance a free ball by one fixed step. True means it has come to rest. */
-export function stepBall(body: BallBody) {
+export function stepBall(body: BallBody, onFloorImpact?: (speed: number, surface: FloorMaterial) => void) {
   const { position, velocity } = body;
   position.addScaledVector(velocity, ballPhysicsStep);
   position.y -= gravity * ballPhysicsStep ** 2 / 2;
@@ -110,9 +104,11 @@ export function stepBall(body: BallBody) {
 
   let material = carpet;
   if (position.y <= ballGroundY) {
-    material = surfaceAt(position);
+    const surface = floorMaterialAt(position);
+    material = surface === "carpet" ? carpet : wood;
     position.y = ballGroundY;
     if (velocity.y < 0) {
+      if (!body.rolling) onFloorImpact?.(-velocity.y, surface);
       velocity.y = bounceSpeed(velocity.y, material.restitution);
       if (velocity.y > 0) {
         velocity.x *= material.retainedSpeed;
