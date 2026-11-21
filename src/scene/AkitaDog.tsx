@@ -1,5 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, type RefObject } from "react";
-import { useFrame, useLoader, type ThreeEvent } from "@react-three/fiber";
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
   AnimationClip,
   AnimationMixer,
@@ -15,9 +15,6 @@ import {
   type AnimationAction,
   type Group,
 } from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import akitaHighUrl from "../assets/akita-high.glb?url";
-import akitaLowUrl from "../assets/akita.glb?url";
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions, isTailPart } from "./petReactions";
@@ -25,6 +22,7 @@ import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
+import { useAkitaModel } from "./useAkitaModel";
 import {
   ballGroundY,
   canReclineAt,
@@ -150,14 +148,19 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
   return fraction === 1;
 }
 
-export function AkitaDog({ ball, dog, handContact }: {
+type AkitaProps = {
   ball: RefObject<BallState>;
   dog: RefObject<Group | null>;
   handContact: RefObject<HandContact | null>;
-}) {
+};
+
+export function AkitaDog(props: AkitaProps) {
   const quality = useGameUI((state) => state.quality);
-  const modelQuality = useDeferredValue(quality);
-  const { scene, animations: assetClips } = useLoader(GLTFLoader, modelQuality === "high" ? akitaHighUrl : akitaLowUrl);
+  const model = useAkitaModel(quality);
+  return model && <AkitaActor {...props} scene={model.scene} assetClips={model.animations} />;
+}
+
+function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
   const animations = useMemo(() => {
     const idle = AnimationClip.findByName(assetClips, "Idle");
     if (!idle) throw new Error("Akita animation missing: Idle");
@@ -277,6 +280,7 @@ export function AkitaDog({ ball, dog, handContact }: {
         playback.current.time = action.time;
       }
       mixer.stopAllAction();
+      mixer.uncacheRoot(scene);
       currentAction.current = null;
     };
   }, [handContact, mixer, play, rest, scene]);

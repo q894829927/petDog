@@ -159,8 +159,8 @@ export function PetWorld() {
           <GroundContactShadows ball={ball} dog={dog} />
         </Suspense>
         <TennisBall ball={ball} dog={dog} />
+        <AkitaDog ball={ball} dog={dog} handContact={handContact} />
         <Suspense fallback={null}>
-          <AkitaDog ball={ball} dog={dog} handContact={handContact} />
           <PlayerHand contact={handContact} ball={ball} />
         </Suspense>
       </Canvas>
