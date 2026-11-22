@@ -1,6 +1,7 @@
 import akitaBarkUrl from "../assets/akita-bark.mp3?inline";
 import akitaPantUrl from "../assets/akita-pant.mp3?inline";
 import bounceUrl from "../assets/ball-bounce.wav?inline";
+import ambienceUrl from "../assets/living-room-ambience.mp3?url";
 import pawWoodUrl from "../assets/paw-wood.wav?inline";
 import pawCarpetUrl from "../assets/paw-carpet.wav?inline";
 import { useGameUI } from "../store/useGameUI";
@@ -12,6 +13,7 @@ const clips = {
   carpet: pawCarpetUrl,
   akitaPant: akitaPantUrl,
   akitaBark: akitaBarkUrl,
+  ambience: ambienceUrl,
 };
 type Clip = keyof typeof clips;
 const buffers = new Map<Clip, AudioBuffer>();
@@ -29,14 +31,43 @@ export function unlockRoomAudio() {
     master.gain.value = Number(useGameUI.getState().soundEnabled);
     master.connect(audio.destination);
     output = master;
+
+    const ambienceGain = audio.createGain();
+    ambienceGain.gain.value = 0;
+    ambienceGain.connect(master);
+    let ambience: AudioBufferSourceNode | undefined;
+    const syncAmbience = () => {
+      if (audio.state !== "running" || document.hidden || !useGameUI.getState().soundEnabled) {
+        ambience?.stop();
+        ambience?.disconnect();
+        ambience = undefined;
+        return;
+      }
+      const buffer = buffers.get("ambience");
+      if (!buffer || ambience) return;
+      ambience = audio.createBufferSource();
+      ambience.buffer = buffer;
+      ambience.loop = true;
+      ambience.connect(ambienceGain);
+      const now = audio.currentTime;
+      ambienceGain.gain.setValueAtTime(0, now);
+      ambienceGain.gain.setTargetAtTime(0.02, now, 0.08);
+      ambience.start();
+    };
+    audio.addEventListener("statechange", syncAmbience);
+    document.addEventListener("visibilitychange", syncAmbience);
     useGameUI.subscribe((state, previous) => {
       if (state.soundEnabled !== previous.soundEnabled) {
         master.gain.setTargetAtTime(Number(state.soundEnabled), audio.currentTime, 0.01);
+        syncAmbience();
       }
     });
     for (const clip of Object.keys(clips) as Clip[]) {
       void fetch(clips[clip]).then((response) => response.arrayBuffer())
-        .then((data) => audio.decodeAudioData(data)).then((buffer) => buffers.set(clip, buffer))
+        .then((data) => audio.decodeAudioData(data)).then((buffer) => {
+          buffers.set(clip, buffer);
+          if (clip === "ambience") syncAmbience();
+        })
         .catch((error: unknown) => console.warn("Room sound could not be decoded", error));
     }
   }
