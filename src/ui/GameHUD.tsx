@@ -115,8 +115,8 @@ function DetailsPanel() {
               <button type="button" className={quality === "low" ? "selected" : ""} aria-pressed={quality === "low"} onClick={() => setQuality("low")}>省电</button>
             </div>
             <p className="modal-note">标准使用高模和阴影。省电使用低模、降低渲染精度并关闭阴影。</p>
-            <p className="setting-label">场景音效</p>
-            <div className="segmented" role="group" aria-label="场景音效">
+            <p className="setting-label">球声</p>
+            <div className="segmented" role="group" aria-label="球声">
               <button type="button" className={sound ? "selected" : ""} aria-pressed={sound} onClick={() => setSound(true)}>开启</button>
               <button type="button" className={sound ? "" : "selected"} aria-pressed={!sound} onClick={() => setSound(false)}>静音</button>
             </div>

@@ -20,9 +20,7 @@ import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget
 import { createPetReactions, isTailPart } from "./petReactions";
 import type { DogShadowAnchors } from "./GroundContactShadows";
 import { hitPetTarget } from "./petTouch";
-import { createAkitaFootsteps } from "./akitaFootsteps";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
-import { maybePlayAkitaBark, playAkitaPant } from "./roomAudio";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
 import { pulseOnTouch } from "./touchHaptics";
@@ -177,7 +175,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
   const reactions = useMemo(() => {
     const lookAround = AnimationClip.findByName(assetClips, "LookAround");
     if (!lookAround) throw new Error("Akita animation missing: LookAround");
-    return createPetReactions(mixer, lookAround, maybePlayAkitaBark);
+    return createPetReactions(mixer, lookAround);
   }, [assetClips, mixer]);
   const head = useMemo(() => {
     const bone = scene.getObjectByName("head");
@@ -199,7 +197,6 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
   }, [dogAnchors, skin]);
   const rig = useRef<Group>(null);
   const idleHeight = useMemo(() => createIdleGrounding(skin), [skin]);
-  const footsteps = useMemo(() => createAkitaFootsteps(skin.skeleton), [skin]);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
@@ -467,7 +464,6 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
         ball.current.motion = { phase: "rest" };
         rest();
         useGameUI.getState().setNotice("团子把球叼回来了！");
-        playAkitaPant();
         recordPetAction("play", trip.owner);
       }
       return;
@@ -510,7 +506,6 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
 
     const toy = ball.current.mesh;
     const clip = action.getClip().name;
-    footsteps(action, group.position, step);
     const body = rig.current;
     if (body && !recline.current) {
       const height = clip === "Idle" ? idleHeight(body) : 0;
