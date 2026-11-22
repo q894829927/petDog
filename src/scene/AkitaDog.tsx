@@ -24,6 +24,7 @@ import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } f
 import { maybePlayAkitaBark, playAkitaPant } from "./roomAudio";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
+import { pulseOnTouch } from "./touchHaptics";
 import { useAkitaModel } from "./useAkitaModel";
 import {
   ballGroundY,
@@ -736,7 +737,9 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
       placeHand(event, "brush", true);
       const startZ = dog.current.worldToLocal(event.point.clone()).z;
       brushing.current = { pointer: event.pointerId, startZ, completed: false };
-    } else if (target.part === "rear") {
+      return;
+    }
+    if (target.part === "rear") {
       const contact = contactFromPointer(event, target.part, true);
       if (!contact) return;
       rearTap.current = { contact, target, x: event.clientX, y: event.clientY, startedAt: now };
@@ -747,6 +750,7 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
       placeHand(event, target.part, true);
       startPetStroke(event.pointerId, target, now);
     }
+    pulseOnTouch(event);
   };
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {

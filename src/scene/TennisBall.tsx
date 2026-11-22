@@ -6,6 +6,7 @@ import { useGameUI } from "../store/useGameUI";
 import { ballBounds, ballPhysicsStep, planBallThrow, predictBallPath, stepBall, type BallBody } from "./ballPhysics";
 import { ballGroundY, ballStart, roomBounds, type FloorPoint } from "./roomNavigation";
 import { playBallBounce } from "./roomAudio";
+import { pulseOnTouch } from "./touchHaptics";
 
 type BallGrab = {
   phase: "held";
@@ -206,6 +207,7 @@ export function TennisBall({ ball, dog }: {
     moveHeldBall(event, grab);
     state.hovered = false;
     state.motion = grab;
+    pulseOnTouch(event);
   };
 
   const pointerMove = (event: ThreeEvent<PointerEvent>) => {
