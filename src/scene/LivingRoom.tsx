@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useLoader } from "@react-three/fiber";
-import { RepeatWrapping, Shape, SRGBColorSpace, TextureLoader, Vector2, type Texture } from "three";
+import { RepeatWrapping, Shape, SRGBColorSpace, TextureLoader, Vector2, type MeshBasicMaterial, type Texture } from "three";
 import floorColorUrl from "../assets/living-room-floor.webp?url";
 import floorNormalUrl from "../assets/living-room-floor-normal.webp?url";
 import windowViewUrl from "../assets/living-room-view.webp?url";
 import { useGameUI } from "../store/useGameUI";
+import { RoomLighting } from "./RoomLighting";
 import { dogBed, floorSurface, foodBowl, roomBounds, rug, wallThickness, windowPlant } from "./roomNavigation";
 
 const width = roomBounds.maxX - roomBounds.minX;
@@ -95,7 +96,7 @@ function FoodBowl() {
   );
 }
 
-function PictureWindow({ view }: { view: Texture }) {
+function PictureWindow({ view, material }: { view: Texture; material: RefObject<MeshBasicMaterial | null> }) {
   const { left, right, bottom, top } = windowOpening;
   const x = (left + right) / 2;
   const y = (bottom + top) / 2;
@@ -108,9 +109,9 @@ function PictureWindow({ view }: { view: Texture }) {
       <RoomBox position={[(roomBounds.maxX + right) / 2, wallHeight / 2, z]} size={[roomBounds.maxX - right, wallHeight, wallThickness]} color={plaster} />
       <RoomBox position={[x, bottom / 2, z]} size={[w, bottom, wallThickness]} color={plaster} />
       <RoomBox position={[x, (top + wallHeight) / 2, z]} size={[w, wallHeight - top, wallThickness]} color={plaster} />
-      <mesh position={[x, y, z - 0.19]}>
+      <mesh name="Window view" position={[x, y, z - 0.19]}>
         <planeGeometry args={[w + 0.6, h + 0.44]} />
-        <meshBasicMaterial map={view} toneMapped={false} />
+        <meshBasicMaterial ref={material} map={view} toneMapped={false} />
       </mesh>
       {[left, left + w / 3, right - w / 3, right].map((divider) => (
         <RoomBox key={divider} position={[divider, y, z + 0.02]} size={[0.095, h, 0.23]} color={trim} />
@@ -148,6 +149,7 @@ function WindowPlant() {
 
 export function LivingRoom({ shadows }: { shadows: boolean }) {
   const centerZ = (roomBounds.minZ + roomBounds.maxZ) / 2;
+  const windowMaterial = useRef<MeshBasicMaterial>(null);
   const [floorColor, floorNormal, view] = useLoader(TextureLoader, [floorColorUrl, floorNormalUrl, windowViewUrl]);
   useLayoutEffect(() => {
     floorColor.colorSpace = SRGBColorSpace;
@@ -164,13 +166,7 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
 
   return (
     <>
-      <color attach="background" args={["#e8dcc9"]} />
-      <hemisphereLight args={["#fff5e4", "#c8b09e", 2.05]} />
-      <directionalLight position={[3.8, 7.5, -4.5]} intensity={2.32} color="#fff0d2"
-        castShadow={shadows} shadow-mapSize-width={1024} shadow-mapSize-height={1024}
-        shadow-camera-left={-8.1} shadow-camera-right={8.1} shadow-camera-top={8.1} shadow-camera-bottom={-8.1}
-        shadow-camera-far={19} shadow-bias={-0.00015} shadow-normalBias={0.006} shadow-intensity={0.92} />
-      <directionalLight position={[-2.9, 4.2, 6]} intensity={0.85} color="#fff7ed" />
+      <RoomLighting shadows={shadows} windowMaterial={windowMaterial} />
       <group name="Living room">
         <mesh name="Wood floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorSurface, centerZ + 2]}>
           <planeGeometry args={[width, depth + 4]} />
@@ -180,7 +176,7 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
         <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color="#e2d7c4" />
         <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color={plaster} />
         <RoomBox position={[0, floorSurface + 0.065, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
-        <PictureWindow view={view} />
+        <PictureWindow view={view} material={windowMaterial} />
         <WindowPlant />
         <InteractionRug />
         <FoodBowl />
