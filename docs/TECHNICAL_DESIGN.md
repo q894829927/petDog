@@ -79,6 +79,7 @@ SQLite 适合当前单服、低频宠物互动和读多写少的规模。数据�
 - 浅木地板采用 ambientCG 的 Wood Floor 066 A。基色贴图为 1024×1024，法线贴图为 512×512，高画质启用地板法线。 [资产](https://ambientcg.com/view?id=WoodFloor066A) · [CC0](https://docs.ambientcg.com/license/)
 - 窗外取自 Andreas Mischok 在 Poly Haven 发布的 Greenwich Park 02，从 1K HDRI 投影为 960×448 的窗景。 [资产](https://polyhaven.com/a/greenwich_park_02) · [CC0](https://polyhaven.com/license)
 - 客厅采用设备本地时间，每天沿清晨、午后、黄昏和夜间的光照参数平滑插值。窗景色调、环境光、窗光和室内补光同步变化，夜间降低窗光和投影强度。
+- 日光与月光沿窗外各自的弧线移动，主光投影随高度和方位改变。晨昏平滑交接时暂时压低投影强度。
 - 木地板和地毯共用同一个接触平面。两档画质都绘制摆件、犬和球的柔和接触阴影，球离地后接触阴影淡出。标准画质还会渲染主光投影。
 
 ### 4.2 宠物行为表现

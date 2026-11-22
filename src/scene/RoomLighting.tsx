@@ -1,6 +1,6 @@
 import { useRef, type RefObject } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Color, MathUtils, type DirectionalLight, type HemisphereLight, type Light, type MeshBasicMaterial } from "three";
+import { Color, MathUtils, Vector3, type DirectionalLight, type HemisphereLight, type Light, type MeshBasicMaterial } from "three";
 
 const light = (color: string, intensity: number) => ({ color: new Color(color), intensity });
 const night = {
@@ -38,6 +38,7 @@ export function RoomLighting({ shadows, windowMaterial }: {
   const sun = useRef<DirectionalLight>(null);
   const fill = useRef<DirectionalLight>(null);
   const mixedColor = useRef(new Color());
+  const lightPosition = useRef(new Vector3());
   const initialized = useRef(false);
 
   useFrame((_, delta) => {
@@ -63,17 +64,30 @@ export function RoomLighting({ shadows, windowMaterial }: {
     tint(sky.current.groundColor, from.ground, to.ground);
     tint(background.current, from.background, to.background);
     tint(windowMaterial.current.color, from.window, to.window);
-    sun.current.shadow.intensity = strength(sun.current.shadow.intensity, from.shadow, to.shadow);
+
+    const solarArc = Math.PI * MathUtils.clamp((hour - 5.5) / 14.3, 0, 1);
+    const lunarHour = hour < 12 ? hour + 24 : hour;
+    const lunarArc = Math.PI * MathUtils.clamp((lunarHour - 19.8) / 9.7, 0, 1);
+    const moonlight = hour < 12 ? 1 - MathUtils.smoothstep(hour, 5, 6.6) : MathUtils.smoothstep(hour, 19.05, 21);
+    lightPosition.current.set(
+      MathUtils.lerp(-7.8 * Math.cos(solarArc), -5.5 * Math.cos(lunarArc), moonlight),
+      MathUtils.lerp(3.4 + 7.6 * Math.sin(solarArc), 4.6 + 4.4 * Math.sin(lunarArc), moonlight),
+      MathUtils.lerp(-6.4, -7.2, moonlight),
+    );
+    sun.current.position.lerp(lightPosition.current, ease);
+    // The shadow fades as the sun and moon exchange places at twilight.
+    const twilight = 1 - 0.72 * Math.sin(Math.PI * moonlight);
+    sun.current.shadow.intensity = strength(sun.current.shadow.intensity, from.shadow * twilight, to.shadow * twilight);
   });
 
   return (
     <>
       <color attach="background" args={["#e8dcc9"]} ref={background} />
       <hemisphereLight name="Room hemisphere light" ref={sky} />
-      <directionalLight name="Window light" ref={sun} position={[3.8, 7.5, -4.5]}
+      <directionalLight name="Window light" ref={sun}
         castShadow={shadows} shadow-mapSize-width={1024} shadow-mapSize-height={1024}
         shadow-camera-left={-8.1} shadow-camera-right={8.1} shadow-camera-top={8.1} shadow-camera-bottom={-8.1}
-        shadow-camera-far={19} shadow-bias={-0.00015} shadow-normalBias={0.006} />
+        shadow-camera-far={24} shadow-bias={-0.00015} shadow-normalBias={0.006} />
       <directionalLight name="Room fill light" ref={fill} position={[-2.9, 4.2, 6]} />
     </>
   );
