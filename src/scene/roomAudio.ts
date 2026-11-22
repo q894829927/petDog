@@ -122,7 +122,7 @@ export function playPawStep(surface: FloorMaterial, intensity: number) {
 }
 
 export function playAkitaPant() {
-  const endsAt = playSound("akitaPant", 0.24, 0.96 + Math.random() * 0.08);
+  const endsAt = playSound("akitaPant", 0.24, 0.98 + Math.random() * 0.04);
   if (endsAt !== undefined) pantEndsAt = endsAt;
 }
 
