@@ -2,19 +2,24 @@ import akitaBarkUrl from "../assets/akita-bark.mp3?inline";
 import akitaPantUrl from "../assets/akita-pant.mp3?inline";
 import bounceUrl from "../assets/ball-bounce.wav?inline";
 import ambienceUrl from "../assets/living-room-ambience.mp3?url";
-import pawWoodUrl from "../assets/paw-wood.wav?inline";
-import pawCarpetUrl from "../assets/paw-carpet.wav?inline";
+import pawWoodAUrl from "../assets/paw-wood-a.mp3?inline";
+import pawWoodBUrl from "../assets/paw-wood-b.mp3?inline";
+import pawCarpetAUrl from "../assets/paw-carpet-a.mp3?inline";
+import pawCarpetBUrl from "../assets/paw-carpet-b.mp3?inline";
 import { useGameUI } from "../store/useGameUI";
 import type { FloorMaterial } from "./roomNavigation";
 
 const clips = {
   bounce: bounceUrl,
-  wood: pawWoodUrl,
-  carpet: pawCarpetUrl,
+  woodA: pawWoodAUrl,
+  woodB: pawWoodBUrl,
+  carpetA: pawCarpetAUrl,
+  carpetB: pawCarpetBUrl,
   akitaPant: akitaPantUrl,
   akitaBark: akitaBarkUrl,
   ambience: ambienceUrl,
 };
+const pawTakes = { wood: ["woodA", "woodB"], carpet: ["carpetA", "carpetB"] } as const;
 type Clip = keyof typeof clips;
 const buffers = new Map<Clip, AudioBuffer>();
 let context: AudioContext | undefined;
@@ -110,8 +115,10 @@ export function playBallBounce(speed: number, surface: FloorMaterial) {
 }
 
 export function playPawStep(surface: FloorMaterial, intensity: number) {
-  const volume = (surface === "wood" ? 0.16 : 0.105) * intensity;
-  playSound(surface, volume, 0.94 + Math.random() * 0.12);
+  const [first, second] = pawTakes[surface];
+  const take = Math.random() < 0.5 ? first : second;
+  const volume = (surface === "wood" ? 0.057 : 0.04) * intensity * (0.9 + Math.random() * 0.2);
+  playSound(take, volume, 0.94 + Math.random() * 0.12);
 }
 
 export function playAkitaPant() {

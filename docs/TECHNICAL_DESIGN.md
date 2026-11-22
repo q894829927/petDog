@@ -378,7 +378,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - 往返两程都用犬身的安全距离检查墙边、碗、狗窝和窗边的花盆。直线被挡住时，可经中央空地转向。抚摸或呼唤等操作可以打断追球。空中的球继续按物理运动至停稳，叼着的球从嘴边落下。
 - 放入狗粮或清水后，团子绕开球和狗窝，走到浅碗前对准碗再低头。`Eat_loop` 和 `Drink_loop` 各自与 `EatDrink_start`、`EatDrink_end` 合成一段动作，碗内食物和水量随播放进度减少。
 - 自主活动会在客厅地板上随机选取附近的落脚点。选点时为身体留出空间，并检查整段路线能否避开场景摆设和球。步行使用 `Walk_F_IP`，按对应根运动 `Walk_F_RM` 的步幅移动。到达后可以站立待机，也可以播放由 `Sitting_start`、`Sitting_loop` 和 `Sitting_end` 合成的坐下休息动作。
-- `Walk`、`Run` 和 `Carry` 的脚步声按秋田各爪的动画落地相位触发。每次用落地爪子的世界坐标区分木地板与地毯，再选对应采样。静止、休息和原地转身时保持安静。 [木地板犬爪采样 · Elenalostale · CC0](https://freesound.org/people/Elenalostale/sounds/518166/) · [地毯采样 · izzylikesnoise · CC0](https://freesound.org/people/izzylikesnoise/sounds/761118/)
+- `Walk`、`Run` 和 `Carry` 的脚步声按秋田各爪的动画落地相位触发。用落地爪子的世界坐标选取木地板或地毯的两条备选采样，每步微调音量和音高。步行以轻踏为主，跑动时稍重。 [木地板步态实录 · Wdomino · CC0](https://freesound.org/people/Wdomino/sounds/517127/) · [地毯爪垫拟音 · KFerentchak · CC0](https://freesound.org/people/KFerentchak/sounds/235932/)
 - 活动一阵后，团子在狗窝旁找安全落点，用 `Lie` 与 `Lie_Sleep` 的过渡和循环片段趴下打盹。听到呼唤会先起身再走近，未受打扰时打盹结束后恢复自主活动。
 - 球挡住路线时宠物会停下并重新选点。玩家互动会中断走动或休息，动画回应结束后先待机，再选取新的落脚点。
 
