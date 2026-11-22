@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
   AnimationClip,
@@ -18,6 +18,7 @@ import {
 import { recordPetAction, useCloudPet } from "../cloud/useCloudPet";
 import { petMessages, useGameUI, type Interaction, type MealKind, type PetTarget } from "../store/useGameUI";
 import { createPetReactions, isTailPart } from "./petReactions";
+import type { DogShadowAnchors } from "./GroundContactShadows";
 import { hitPetTarget } from "./petTouch";
 import { createAkitaFootsteps } from "./akitaFootsteps";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
@@ -154,6 +155,7 @@ function moveToward(position: FloorPoint, target: FloorPoint, distance: number) 
 type AkitaProps = {
   ball: RefObject<BallState>;
   dog: RefObject<Group | null>;
+  dogAnchors: RefObject<DogShadowAnchors | null>;
   handContact: RefObject<HandContact | null>;
 };
 
@@ -163,7 +165,7 @@ export function AkitaDog(props: AkitaProps) {
   return model && <AkitaActor {...props} scene={model.scene} assetClips={model.animations} />;
 }
 
-function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
+function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
   const animations = useMemo(() => {
     const idle = AnimationClip.findByName(assetClips, "Idle");
     if (!idle) throw new Error("Akita animation missing: Idle");
@@ -187,6 +189,14 @@ function AkitaActor({ ball, dog, handContact, scene, assetClips }: AkitaProps & 
     if (!(mesh instanceof SkinnedMesh)) throw new Error("Akita skinned mesh missing");
     return mesh;
   }, [scene]);
+  useLayoutEffect(() => {
+    const hips = skin.skeleton.getBoneByName("Spine_01");
+    const chest = skin.skeleton.getBoneByName("Spine_05");
+    const muzzle = skin.skeleton.getBoneByName("nose");
+    if (!hips || !chest || !muzzle) throw new Error("Akita contact shadow anchors missing");
+    dogAnchors.current = { hips, chest, muzzle };
+    return () => { dogAnchors.current = null; };
+  }, [dogAnchors, skin]);
   const rig = useRef<Group>(null);
   const idleHeight = useMemo(() => createIdleGrounding(skin), [skin]);
   const footsteps = useMemo(() => createAkitaFootsteps(skin.skeleton), [skin]);

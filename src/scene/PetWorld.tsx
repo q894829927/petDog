@@ -3,7 +3,7 @@ import { Canvas, events, useFrame, useThree, type RootStore } from "@react-three
 import { MathUtils, SkinnedMesh, Vector3, type Group, type PerspectiveCamera } from "three";
 import { useGameUI } from "../store/useGameUI";
 import { AkitaDog } from "./AkitaDog";
-import { GroundContactShadows } from "./GroundContactShadows";
+import { GroundContactShadows, type DogShadowAnchors } from "./GroundContactShadows";
 import { LivingRoom } from "./LivingRoom";
 import { PlayerHand, type HandContact } from "./PlayerHand";
 import { ballFloorPoint, cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
@@ -121,6 +121,7 @@ function StageCamera({ ball, dog, contact }: {
 export function PetWorld() {
   const highQuality = useGameUI((state) => state.quality === "high");
   const dog = useRef<Group>(null);
+  const dogAnchors = useRef<DogShadowAnchors | null>(null);
   const ball = useRef<BallState>({ mesh: null, hovered: false, motion: { phase: "rest" } });
   const handContact = useRef<HandContact | null>(null);
   const sceneEvents = useCallback((store: RootStore) => roomEvents(store, ball, dog), []);
@@ -156,10 +157,10 @@ export function PetWorld() {
         <StageCamera ball={ball} dog={dog} contact={handContact} />
         <Suspense fallback={null}>
           <LivingRoom shadows={highQuality} />
-          <GroundContactShadows ball={ball} dog={dog} />
+          <GroundContactShadows ball={ball} dog={dog} dogAnchors={dogAnchors} />
         </Suspense>
         <TennisBall ball={ball} dog={dog} />
-        <AkitaDog ball={ball} dog={dog} handContact={handContact} />
+        <AkitaDog ball={ball} dog={dog} dogAnchors={dogAnchors} handContact={handContact} />
         <Suspense fallback={null}>
           <PlayerHand contact={handContact} ball={ball} />
         </Suspense>
