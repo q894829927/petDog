@@ -1,15 +1,20 @@
-import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import { useLoader } from "@react-three/fiber";
-import { RepeatWrapping, Shape, SRGBColorSpace, TextureLoader, Vector2, type MeshBasicMaterial, type Texture } from "three";
+import { RepeatWrapping, SRGBColorSpace, TextureLoader, Vector2, type MeshBasicMaterial, type Texture } from "three";
 import floorColorUrl from "../assets/living-room-floor.webp?url";
 import floorNormalUrl from "../assets/living-room-floor-normal.webp?url";
+import floorRoughnessUrl from "../assets/living-room-floor-roughness.webp?url&no-inline";
 import windowViewUrl from "../assets/living-room-view.webp?url";
 import { useGameUI } from "../store/useGameUI";
+import { DogBed } from "./DogBed";
+import { InteractionRug } from "./InteractionRug";
 import { RoomLighting } from "./RoomLighting";
-import { dogBed, floorSurface, foodBowl, roomBounds, rug, wallThickness, windowPlant } from "./roomNavigation";
+import { floorSurface, foodBowl, roomBounds, wallThickness, windowPlant } from "./roomNavigation";
 
 const width = roomBounds.maxX - roomBounds.minX;
 const depth = roomBounds.maxZ - roomBounds.minZ;
+// Nine boards across the scan give each plank a width of about 0.42 room units.
+const floorTileSize = 3.8;
 const wallHeight = 6.25;
 const windowOpening = { left: -2.12, right: 4.95, bottom: 0.48, top: 3.63 };
 const plaster = "#ece4d4";
@@ -29,42 +34,6 @@ function RoomBox({ position, size, color }: {
       <boxGeometry args={size} />
       <meshStandardMaterial color={color} roughness={0.88} />
     </mesh>
-  );
-}
-
-function roundedMat(width: number, depth: number, radius: number) {
-  const shape = new Shape();
-  const x = width / 2;
-  const z = depth / 2;
-  shape.moveTo(-x + radius, -z);
-  shape.lineTo(x - radius, -z);
-  shape.quadraticCurveTo(x, -z, x, -z + radius);
-  shape.lineTo(x, z - radius);
-  shape.quadraticCurveTo(x, z, x - radius, z);
-  shape.lineTo(-x + radius, z);
-  shape.quadraticCurveTo(-x, z, -x, z - radius);
-  shape.lineTo(-x, -z + radius);
-  shape.quadraticCurveTo(-x, -z, -x + radius, -z);
-  return shape;
-}
-
-function InteractionRug() {
-  const { border, center } = useMemo(() => ({
-    border: roundedMat(rug.width, rug.depth, rug.cornerRadius),
-    center: roundedMat(rug.width - 0.18, rug.depth - 0.18, 0.34),
-  }), []);
-  // The material offsets draw the rug above the wood without moving the shared floor surface.
-  return (
-    <group name="Interaction rug" position={[rug.x, floorSurface, rug.z]} rotation={[-Math.PI / 2, 0, 0]}>
-      <mesh receiveShadow>
-        <shapeGeometry args={[border, 10]} />
-        <meshStandardMaterial color="#bd9f78" roughness={1} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
-      </mesh>
-      <mesh receiveShadow>
-        <shapeGeometry args={[center, 10]} />
-        <meshStandardMaterial color="#e4ceae" roughness={1} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
-      </mesh>
-    </group>
   );
 }
 
@@ -150,19 +119,21 @@ function WindowPlant() {
 export function LivingRoom({ shadows }: { shadows: boolean }) {
   const centerZ = (roomBounds.minZ + roomBounds.maxZ) / 2;
   const windowMaterial = useRef<MeshBasicMaterial>(null);
-  const [floorColor, floorNormal, view] = useLoader(TextureLoader, [floorColorUrl, floorNormalUrl, windowViewUrl]);
+  const [floorColor, view] = useLoader(TextureLoader, [floorColorUrl, windowViewUrl]);
+  const [floorNormal, floorRoughness] = useLoader(TextureLoader, shadows ? [floorNormalUrl, floorRoughnessUrl] : []);
   useLayoutEffect(() => {
     floorColor.colorSpace = SRGBColorSpace;
     view.colorSpace = SRGBColorSpace;
     view.needsUpdate = true;
-    for (const texture of [floorColor, floorNormal]) {
+    for (const texture of [floorColor, floorNormal, floorRoughness]) {
+      if (!texture) continue;
       texture.wrapS = RepeatWrapping;
       texture.wrapT = RepeatWrapping;
-      texture.repeat.set(2.2, 2.2 * (depth + 4) / width);
+      texture.repeat.set(width / floorTileSize, (depth + 4) / floorTileSize);
       texture.anisotropy = shadows ? 8 : 2;
       texture.needsUpdate = true;
     }
-  }, [floorColor, floorNormal, view, shadows]);
+  }, [floorColor, floorNormal, floorRoughness, view, shadows]);
 
   return (
     <>
@@ -170,26 +141,17 @@ export function LivingRoom({ shadows }: { shadows: boolean }) {
       <group name="Living room">
         <mesh name="Wood floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorSurface, centerZ + 2]}>
           <planeGeometry args={[width, depth + 4]} />
-          <meshStandardMaterial color="#dbe0eb" map={floorColor} normalMap={shadows ? floorNormal : null}
-            normalScale={[0.37, 0.37]} roughness={0.8} />
+          <meshStandardMaterial map={floorColor} normalMap={floorNormal ?? null}
+            roughnessMap={floorRoughness ?? null} roughness={shadows ? 1 : 0.62} />
         </mesh>
         <RoomBox position={[roomBounds.minX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color="#e2d7c4" />
         <RoomBox position={[roomBounds.maxX, wallHeight / 2, centerZ]} size={[wallThickness, wallHeight, depth]} color={plaster} />
         <RoomBox position={[0, floorSurface + 0.065, roomBounds.minZ + 0.14]} size={[width, 0.13, 0.08]} color={trim} />
         <PictureWindow view={view} material={windowMaterial} />
         <WindowPlant />
-        <InteractionRug />
+        <InteractionRug detailed={shadows} />
         <FoodBowl />
-        <group name="Dog bed" position={[dogBed.x, floorSurface, dogBed.z]}>
-          <mesh position-y={dogBed.rimHeight} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-            <torusGeometry args={[dogBed.radius - dogBed.rimThickness, dogBed.rimThickness, 16, 56]} />
-            <meshStandardMaterial color="#9e7e6e" roughness={0.98} />
-          </mesh>
-          <mesh position-y={dogBed.cushionHeight / 2} castShadow receiveShadow>
-            <cylinderGeometry args={[dogBed.cushionRadius, dogBed.cushionRadius, dogBed.cushionHeight, 48]} />
-            <meshStandardMaterial color="#d7bc9f" roughness={1} />
-          </mesh>
-        </group>
+        <DogBed detailed={shadows} />
       </group>
     </>
   );
