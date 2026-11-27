@@ -24,6 +24,8 @@ import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
 import { createAkitaBallGaze } from "./akitaBallGaze";
+import { createAkitaHighFive, isHighFiveSit } from "./akitaHighFive";
+import { createSitHighFive, type HighFiveState } from "./highFive";
 import { ballFloorPoint, dropBall, nudgeBall, type BallState } from "./TennisBall";
 import { pulseOnTouch } from "./touchHaptics";
 import { useAkitaModel } from "./useAkitaModel";
@@ -167,6 +169,7 @@ type AkitaProps = {
   dog: RefObject<Group | null>;
   dogAnchors: RefObject<DogShadowAnchors | null>;
   handContact: RefObject<HandContact | null>;
+  highFive: RefObject<HighFiveState>;
 };
 
 export function AkitaDog(props: AkitaProps) {
@@ -175,7 +178,7 @@ export function AkitaDog(props: AkitaProps) {
   return model && <AkitaActor {...props} scene={model.scene} assetClips={model.animations} />;
 }
 
-function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
+function AkitaActor({ ball, dog, dogAnchors, handContact, highFive, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
   const animations = useMemo(() => {
     const idle = AnimationClip.findByName(assetClips, "Idle");
     const napDown = AnimationClip.findByName(assetClips, "NapDown");
@@ -198,6 +201,13 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     return bone;
   }, [scene]);
   const ballGaze = useMemo(() => createAkitaBallGaze(head), [head]);
+  const pawPose = useMemo(() => createAkitaHighFive(scene), [scene]);
+  const highFiveMotion = useMemo(() => createSitHighFive(highFive.current, pawPose), [highFive, pawPose]);
+  const shownHandHint = useRef(false);
+  useLayoutEffect(() => () => {
+    pawPose.restore();
+    highFiveMotion.reset();
+  }, [highFiveMotion, pawPose]);
   const skin = useMemo(() => {
     const mesh = scene.getObjectByProperty("isSkinnedMesh", true);
     if (!(mesh instanceof SkinnedMesh)) throw new Error("Akita skinned mesh missing");
@@ -215,7 +225,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
   const idleHeight = useMemo(() => createIdleGrounding(skin), [skin]);
   const recline = useRef<Recline | null>(null);
   const poseReclined = useMemo(createReclinedPose, []);
-  const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
+  const roaming = useRef({ target: null as (FloorPoint & { sitHeading?: number }) | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
   const fetch = useRef<FetchTrip | null>(null);
   const invitation = useRef({ idle: 0, after: MathUtils.randFloat(30, 45), cooldown: 0, resumed: true });
   const offer = useRef<PlayOffer | null>(null);
@@ -567,6 +577,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
       !(contact?.pressed && isTailPart(contact.gesture));
     reactions.updateTail(step, cloud.pet, canWag);
     ballGaze.restore();
+    pawPose.restore();
     mixer.update(step);
 
     const group = dog.current;
@@ -608,6 +619,15 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
       const height = clip === "Idle" ? idleHeight(body) : 0;
       body.position.y = MathUtils.damp(body.position.y, height, 34, step);
     }
+    const canHighFive = isHighFiveSit(action) && !document.hidden && !ui.panel && !ui.foodOpen && !ui.brushEquipped &&
+      !contact?.pressed && ballPhase === "rest" && !fetch.current && !approach.current && !rearReaction.current && !cloud.pet?.sleeping;
+    const greetingPaw = highFiveMotion.update(action, group, camera, size, canHighFive, step,
+      () => ui.setNotice("团子用爪垫碰了一下你的手掌。"));
+    if (!shownHandHint.current && highFive.current.radius > 0 && !ui.notice) {
+      shownHandHint.current = true;
+      ui.setNotice("团子坐好了，把手停在它胸前的空处，可以击掌。");
+    }
+    if (greetingPaw) return;
     const cue = rearReaction.current;
     if (cue?.phase === "contact") {
       cue.time -= step;
@@ -850,6 +870,13 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     }
     const target = activity.target;
     if (clip !== "Walk" || !target) return;
+    if (target.sitHeading !== undefined) {
+      if (face(group, target.sitHeading, turnSpeed * step)) {
+        activity.target = null;
+        play("Sit");
+      }
+      return;
+    }
     if (!clearsBall(group.position, target, ballPosition)) {
       rest();
       return;
@@ -857,9 +884,12 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     const motionStep = step * action.getEffectiveWeight();
     if (!face(group, headingTo(group.position, target), turnSpeed * motionStep)) return;
     if (moveToward(group.position, target, walkSpeed * motionStep)) {
-      activity.target = null;
-      if (Math.random() < 0.5) play("Sit");
-      else rest();
+      if (Math.random() < 0.5) {
+        // Finish the turn on the walking clip, so the chest is reachable once the paws are planted.
+        const towardPlayer = headingTo(group.position, camera.position);
+        const offset = MathUtils.euclideanModulo(group.rotation.y - towardPlayer + Math.PI, 2 * Math.PI) - Math.PI;
+        target.sitHeading = towardPlayer + MathUtils.clamp(offset, -1.45, 1.45);
+      } else rest();
     }
   });
 

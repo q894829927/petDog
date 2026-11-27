@@ -9,9 +9,10 @@ import { PlayerHand, type HandContact } from "./PlayerHand";
 import { ballFloorPoint, cancelBallGrab, TennisBall, type BallState } from "./TennisBall";
 import { createNearbyTouchPicker } from "./petTouch";
 import { ballStart, dogHome } from "./roomNavigation";
+import { createHighFiveState, highFiveSide, type HighFiveState } from "./highFive";
 
 const roomFov = 37;
-function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject<Group | null>) {
+function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject<Group | null>, highFive: HighFiveState) {
   const base = events(store);
   const pickNearby = createNearbyTouchPicker();
   const ballCenter = new Vector3();
@@ -25,13 +26,29 @@ function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject
     },
     filter(hits, { camera, pointer, size }) {
       const { mesh: toy, motion } = ball.current;
-      if (motion.phase === "held") return hits.filter(({ object }) => object === toy);
+      if (motion.phase === "held") {
+        highFive.pointer = null;
+        return hits.filter(({ object }) => object === toy);
+      }
       if (motion.phase !== "rest") hits = hits.filter(({ object }) => object !== toy);
-      const { panel, foodOpen } = useGameUI.getState();
+      const { panel, foodOpen, brushEquipped } = useGameUI.getState();
       const event = pointerEvent;
-      if (!event?.isPrimary || panel || foodOpen ||
-          (event.type !== "pointerdown" && event.type !== "pointermove") ||
-          hits.some(({ object }) => object instanceof SkinnedMesh || object === toy)) return hits;
+      if (!event?.isPrimary) {
+        if (event?.pointerType === "touch" && event.type === "pointerdown") highFive.pointer = null;
+        return hits;
+      }
+      if (event.type !== "pointerdown" && event.type !== "pointermove") return hits;
+      const prior = highFive.pointer;
+      const touch = event.pointerType === "touch";
+      const offering = !panel && !foodOpen && !brushEquipped && (touch ? event.buttons === 1 &&
+        (event.type === "pointerdown" || prior?.id === event.pointerId) : event.pointerType === "mouse" && event.buttons === 0);
+      highFive.pointer = null;
+      const inReach = offering && highFiveSide(highFive, pointer, size) !== null;
+      // A raised paw can enter the same ray as the hand that was already waiting in the air.
+      if (inReach && highFive.offered && prior?.id === event.pointerId && event.type === "pointermove") {
+        hits = hits.filter(({ object }) => !(object instanceof SkinnedMesh));
+      }
+      if (panel || foodOpen || hits.some(({ object }) => object instanceof SkinnedMesh || object === toy)) return hits;
 
       if (toy && motion.phase === "rest" && (event.type === "pointerdown" || event.buttons === 0)) {
         // Leave a small margin around the visible ball without overriding a direct hit on the dog.
@@ -44,7 +61,12 @@ function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject
         }
       }
 
-      if (event.pointerType !== "touch" || (event.type === "pointermove" && (event.buttons & 1) === 0)) return hits;
+      if (inReach) {
+        highFive.pointer = prior?.id === event.pointerId ? prior : { id: event.pointerId, touch, ndc: pointer.clone() };
+        highFive.pointer.ndc.copy(pointer);
+        return hits;
+      }
+      if (!touch || (event.type === "pointermove" && (event.buttons & 1) === 0)) return hits;
       const mesh = dog.current?.getObjectByProperty("isSkinnedMesh", true);
       if (!(mesh instanceof SkinnedMesh)) return hits;
       const nearby = pickNearby(mesh, camera, pointer, size.width, size.height);
@@ -54,10 +76,11 @@ function roomEvents(store: RootStore, ball: RefObject<BallState>, dog: RefObject
   return manager;
 }
 
-function StageCamera({ ball, dog, contact }: {
+function StageCamera({ ball, dog, contact, highFive }: {
   ball: RefObject<BallState>;
   dog: RefObject<Group | null>;
   contact: RefObject<HandContact | null>;
+  highFive: HighFiveState;
 }) {
   const { camera, size } = useThree();
   const portrait = size.width < 640 && size.width < size.height;
@@ -78,7 +101,7 @@ function StageCamera({ ball, dog, contact }: {
   useFrame((_, delta) => {
     const sceneBall = ball.current;
     const { motion } = sceneBall;
-    if (motion.phase === "held" || motion.phase === "putBack" || contact.current?.pressed) return;
+    if (motion.phase === "held" || motion.phase === "putBack" || contact.current?.pressed || highFive.offered) return;
 
     const pet = dog.current?.position ?? dogHome;
     const offsetX = pet.x - 0.12;
@@ -124,8 +147,22 @@ export function PetWorld() {
   const dogAnchors = useRef<DogShadowAnchors | null>(null);
   const ball = useRef<BallState>({ mesh: null, hovered: false, motion: { phase: "rest" } });
   const handContact = useRef<HandContact | null>(null);
-  const sceneEvents = useCallback((store: RootStore) => roomEvents(store, ball, dog), []);
+  const highFive = useRef(createHighFiveState());
+  const sceneEvents = useCallback((store: RootStore) => roomEvents(store, ball, dog, highFive.current), []);
+  useEffect(() => {
+    const clearPointer = () => { highFive.current.pointer = null; };
+    window.addEventListener("blur", clearPointer);
+    document.addEventListener("visibilitychange", clearPointer);
+    return () => {
+      window.removeEventListener("blur", clearPointer);
+      document.removeEventListener("visibilitychange", clearPointer);
+    };
+  }, []);
+  const clearHighFive = (event: PointerEvent<HTMLDivElement>) => {
+    if (highFive.current.pointer?.id === event.pointerId) highFive.current.pointer = null;
+  };
   const releaseHand = (event: PointerEvent<HTMLDivElement>) => {
+    clearHighFive(event);
     cancelBallGrab(ball.current, event.pointerId);
     const target = handContact.current;
     if (target?.pointer !== event.pointerId) return;
@@ -135,6 +172,7 @@ export function PetWorld() {
     }
   };
   const cancelHand = (event: PointerEvent<HTMLDivElement>) => {
+    clearHighFive(event);
     cancelBallGrab(ball.current, event.pointerId);
     if (handContact.current?.pointer === event.pointerId) handContact.current = null;
   };
@@ -144,7 +182,11 @@ export function PetWorld() {
       aria-label="秋田犬的 3D 宠物房间"
       onPointerUp={releaseHand}
       onPointerCancel={cancelHand}
-      onLostPointerCapture={(event) => cancelBallGrab(ball.current, event.pointerId)}
+      onPointerLeave={clearHighFive}
+      onLostPointerCapture={(event) => {
+        clearHighFive(event);
+        cancelBallGrab(ball.current, event.pointerId);
+      }}
     >
       <Canvas
         events={sceneEvents}
@@ -154,15 +196,15 @@ export function PetWorld() {
         gl={{ antialias: highQuality, powerPreference: "high-performance" }}
         fallback={<div className="webgl-fallback">当前设备无法加载 3D 场景，请尝试其他浏览器。</div>}
       >
-        <StageCamera ball={ball} dog={dog} contact={handContact} />
+        <StageCamera ball={ball} dog={dog} contact={handContact} highFive={highFive.current} />
         <Suspense fallback={null}>
           <LivingRoom shadows={highQuality} />
           <GroundContactShadows ball={ball} dog={dog} dogAnchors={dogAnchors} />
         </Suspense>
         <TennisBall ball={ball} dog={dog} />
-        <AkitaDog ball={ball} dog={dog} dogAnchors={dogAnchors} handContact={handContact} />
+        <AkitaDog ball={ball} dog={dog} dogAnchors={dogAnchors} handContact={handContact} highFive={highFive} />
         <Suspense fallback={null}>
-          <PlayerHand contact={handContact} ball={ball} />
+          <PlayerHand contact={handContact} ball={ball} highFive={highFive} />
         </Suspense>
       </Canvas>
     </div>

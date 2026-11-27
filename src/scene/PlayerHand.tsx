@@ -8,6 +8,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import playerHandUrl from "../assets/player-hand.glb?url";
 import { useGameUI, type PetPart } from "../store/useGameUI";
 import { createHandClearance } from "./handClearance";
+import type { HighFiveState } from "./highFive";
 import { hitPetTarget, samplePetSurface, type PetSurface } from "./petTouch";
 import { ballGripCloseTime, ballPutBackTime, type BallState } from "./TennisBall";
 
@@ -28,12 +29,15 @@ const bendAxis = new Vector3(0, 0, 1);
 const pitchAxis = new Vector3(1, 0, 0);
 const worldUp = new Vector3(0, 1, 0);
 const palmPad = new Vector3(-0.013, 0.104, -0.016);
+// Center of the open palm surface, after the hand mesh's local Z reflection.
+const highFivePad = new Vector3(-0.008, 0.075, -0.00936);
 const ballGripCenter = new Vector3(-0.02233, 0.10959, -0.04808);
 const indexPad = new Vector3(0, 0.023, 0);
 const combToothTip = new Vector3(-0.014, 0.179, -0.074);
 const combToothLength = 0.036;
 const fingerNames = ["index", "middle", "ring", "pinky", "thumb"];
 const restCurls = [0.06, 0.08, 0.1, 0.12, 0.035];
+const openPalmCurls = [-0.065, -0.08, -0.07, -0.035, 0.02];
 // Local joint angles in degrees, from the knuckle to the tip, fitted to the tennis ball.
 const ballGripAngles = [
   [[-11.5, 9, -19], [0, 0, -28.5], [0, 0, -13.3]], // Index
@@ -92,7 +96,11 @@ function fingerCurl(gesture: HandPose, finger: number, phase: number, stroke: nu
   }
 }
 
-export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact | null>; ball: RefObject<BallState> }) {
+export function PlayerHand({ contact, ball, highFive }: {
+  contact: RefObject<HandContact | null>;
+  ball: RefObject<BallState>;
+  highFive: RefObject<HighFiveState>;
+}) {
   const { scene } = useLoader(GLTFLoader, playerHandUrl);
   const hand = useRef<Group>(null);
   const comb = useRef<Group>(null);
@@ -163,6 +171,7 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     missedFor: contactGrace,
     reach: 0,
     onBall: false,
+    onHighFive: false,
     ballGrip: 0,
     clearance: 0,
     materials: null as ReturnType<typeof handMaterials> | null,
@@ -191,7 +200,11 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
     const toss = motion.phase === "flight" && motion.play && motion.elapsed < 0.26 ? motion : null;
     const gripTime = holdingBall ? motion.elapsed : toss && toss.elapsed < 0 ? toss.elapsed + ballGripCloseTime : null;
     const ballPoint = disabled || (!holdingBall && !puttingBack && !toss && !hovered) ? null : toss?.from ?? toy?.position;
-    if (ballPoint || (pose.onBall && !target && !appearing)) {
+    const greeting = highFive.current;
+    const offer = greeting.offered && !disabled && !brushEquipped && !target?.pressed && !ballPoint;
+    greeting.handReady = false;
+    if (ballPoint || (pose.onBall && !offer && !target && !appearing)) {
+      pose.onHighFive = false;
       if (!pose.onBall) {
         pose.lastContact = null;
         pose.startedAt = null;
@@ -253,6 +266,49 @@ export function PlayerHand({ contact, ball }: { contact: RefObject<HandContact |
       return;
     }
     pose.onBall = false;
+    if (offer || (pose.onHighFive && !target && !appearing)) {
+      pose.onHighFive = true;
+      pose.lastContact = null;
+      pose.startedAt = null;
+      pose.clearance = 0;
+      pose.pressure = 0;
+      pose.ballGrip = 0;
+      pose.combMix = 0;
+      toolModel.visible = false;
+      if (offer) {
+        pose.point.copy(greeting.point);
+        pose.normal.copy(greeting.outward);
+      }
+      pose.reach = MathUtils.clamp(pose.reach + (offer ? step / reachTime : -step / retractTime), 0, 1);
+      group.visible = pose.reach > 0;
+      if (!group.visible) return;
+
+      // Local -Z is the palm side. Let the wrist enter from slightly below and to the right.
+      pose.z.set(pose.normal.x, 0, pose.normal.z).normalize();
+      pose.x.crossVectors(worldUp, pose.z);
+      pose.y.copy(worldUp).addScaledVector(pose.x, -0.12).normalize();
+      pose.x.crossVectors(pose.y, pose.z);
+      pose.rotation.setFromRotationMatrix(pose.basis.makeBasis(pose.x, pose.y, pose.z));
+      group.quaternion.slerp(pose.rotation, appearing ? 1 : blend);
+      for (let finger = 0; finger < pose.curl.length; finger++) {
+        pose.curl[finger] = MathUtils.lerp(pose.curl[finger], openPalmCurls[finger], appearing ? 1 : blend);
+      }
+      rig.bendFingers(pose.curl, pose.offset, 0);
+      const retreat = 1 - MathUtils.smoothstep(pose.reach, 0, 1);
+      pose.goal.copy(pose.point).addScaledVector(pose.z, 0.20 * retreat);
+      pose.goal.y -= 0.13 * retreat;
+      pose.palmPad.copy(highFivePad).multiplyScalar(group.scale.x).applyQuaternion(group.quaternion);
+      group.position.lerp(pose.goal.sub(pose.palmPad), appearing ? 1 : blend);
+      pose.palmPad.add(group.position);
+      greeting.handReady = offer && pose.reach > 0.9 && pose.palmPad.distanceToSquared(pose.point) < 0.045 ** 2
+        && group.quaternion.angleTo(pose.rotation) < 0.18;
+
+      pose.materials ??= handMaterials(group, toolModel);
+      const opacity = MathUtils.smoothstep(pose.reach, 0, 0.72);
+      for (const material of pose.materials.skin) material.opacity = opacity;
+      return;
+    }
+    pose.onHighFive = false;
     if (appearing && !target) return;
     pose.repickIn = Math.max(0, pose.repickIn - step);
     if (target) {
