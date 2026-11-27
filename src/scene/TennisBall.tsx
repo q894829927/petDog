@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type RefObject } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { DataTexture, LinearFilter, LinearMipmapLinearFilter, MathUtils, Plane, Raycaster, RepeatWrapping, SRGBColorSpace, Vector2, Vector3, type Group, type Mesh } from "three";
+import { BallThrowGesture } from "./ballThrowGesture";
 import { useCloudPet } from "../cloud/useCloudPet";
 import { useGameUI } from "../store/useGameUI";
 import { ballBounds, ballPhysicsStep, planBallThrow, predictBallPath, stepBall, type BallBody } from "./ballPhysics";
@@ -15,8 +16,7 @@ type BallGrab = {
   goal: Vector3;
   plane: Plane;
   offset: Vector2;
-  downX: number;
-  downY: number;
+  gesture: BallThrowGesture;
   elapsed: number;
 };
 
@@ -33,7 +33,7 @@ type BallFlight = {
   play: { sequence: number; owner: number | null } | null;
 };
 
-type BallPutBack = { phase: "putBack"; from: Vector3; to: Vector3; elapsed: number };
+type BallPutBack = { phase: "putBack"; from: Vector3; to: Vector3; elapsed: number; gesture?: BallThrowGesture };
 
 export type BallState = {
   mesh: Mesh | null;
@@ -108,15 +108,15 @@ export function ballFloorPoint({ mesh, motion }: BallState): FloorPoint {
   return mesh?.position ?? ballStart;
 }
 
-export function cancelBallGrab(ball: BallState, pointer: number) {
+export function cancelBallGrab(ball: BallState, pointer: number, gesture?: BallThrowGesture) {
   const { mesh, motion } = ball;
   if (!mesh || motion.phase !== "held" || motion.pointer !== pointer) return;
-  if (mesh.position.distanceToSquared(motion.origin) < 0.00001) {
+  if (!gesture?.feint && mesh.position.distanceToSquared(motion.origin) < 0.00001) {
     mesh.position.copy(motion.origin);
     ball.motion = { phase: "rest" };
     return;
   }
-  ball.motion = { phase: "putBack", from: mesh.position.clone(), to: motion.origin, elapsed: 0 };
+  ball.motion = { phase: "putBack", from: mesh.position.clone(), to: motion.origin, elapsed: 0, gesture };
 }
 
 export function TennisBall({ ball, dog }: {
@@ -145,6 +145,7 @@ export function TennisBall({ ball, dog }: {
 
     const step = Math.min(delta, 0.05);
     if (motion.phase === "held") {
+      motion.gesture.hold(performance.now());
       motion.elapsed += step;
       const lift = MathUtils.smoothstep(motion.elapsed, ballGripCloseTime, ballGripCloseTime + 0.12);
       liftGoal.lerpVectors(motion.origin, motion.goal, lift);
@@ -208,8 +209,7 @@ export function TennisBall({ ball, dog }: {
       goal: toy.position.clone(),
       plane: new Plane(new Vector3(0, 0, 1), -reachZ),
       offset: new Vector2(center.x, center.y).sub(event.pointer),
-      downX: event.clientX,
-      downY: event.clientY,
+      gesture: new BallThrowGesture(event.clientX, event.clientY, event.nativeEvent.timeStamp, Math.min(size.width, size.height)),
       elapsed: 0,
     };
     (event.target as Element).setPointerCapture(event.pointerId);
@@ -227,6 +227,10 @@ export function TennisBall({ ball, dog }: {
     const motion = state.motion;
     if (motion.phase === "held" && motion.pointer === event.pointerId) {
       event.stopPropagation();
+      for (const point of event.nativeEvent.getCoalescedEvents?.() ?? []) {
+        motion.gesture.move(point.clientX, point.clientY, point.timeStamp);
+      }
+      motion.gesture.move(event.clientX, event.clientY, event.nativeEvent.timeStamp);
       moveHeldBall(event, motion);
     } else if (motion.phase === "rest" && event.pointerType === "mouse" && event.buttons === 0) {
       event.stopPropagation();
@@ -239,13 +243,13 @@ export function TennisBall({ ball, dog }: {
     const grab = state.motion;
     if (grab.phase !== "held" || grab.pointer !== event.pointerId) return;
     event.stopPropagation();
-    const dx = event.clientX - grab.downX;
-    const dy = event.clientY - grab.downY;
+    const { dx, dy } = grab.gesture.release(event.clientX, event.clientY, event.nativeEvent.timeStamp);
     const distance = Math.hypot(dx, dy);
     const minimum = event.pointerType === "touch" ? 18 : 12;
     const ui = useGameUI.getState();
     if (distance < minimum || ui.panel || ui.foodOpen || !dog.current) {
-      cancelBallGrab(state, event.pointerId);
+      // A deliberate release after the pause can reach us before the next rendered frame.
+      cancelBallGrab(state, event.pointerId, !ui.panel && !ui.foodOpen && dog.current ? grab.gesture : undefined);
     } else {
       const power = MathUtils.smoothstep(distance, minimum, Math.min(size.width, size.height) * 0.33);
       const from = event.object.position.clone();

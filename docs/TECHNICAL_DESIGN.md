@@ -373,6 +373,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - 玩家手和球共用场景深度。球裸露的轮廓外保留少量指针容差，直接命中犬身时按首个交点处理。按住球期间捕获指针。拇指从侧面贴球，其他四指从另一侧收拢，球靠近掌心并在收拢后抬起随手移动。拖动方向和长度给松手的球一个初速度，手指张开并随挥。轻点或指针取消时，手把球放回原处。
 - 触屏抚摸命中和成功抓球时调用一次 14 毫秒的原生震动。首次触屏在松手完成浏览器激活后反馈。 [Vibration API](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/vibrate)
 - 松手后以 1/120 秒固定时间步模拟重力、反弹和滚动阻力。木地板的恢复系数高于地毯，球也会与房间边界、碗、狗窝和花盆碰撞。出手时用同一模拟预判镜头范围，球在狭窄处会降低初速度或微调出手方向，为叼取留出空间。
+- 持球时用同一套指针轨迹识别假抛。200 毫秒内快速挥过视口短边的 8%（限 32–64 CSS 像素），再停住 250 毫秒才触发。假抛消耗这段挥动，将当前位置作为下次出手起点。团子沿挥动方向安全迈步，然后回望实际持球位置；前两次分别最多前进 0.68 和 0.30 个场景单位，第三次起原地观察。真抛或两次假抛相隔一分钟会重置反应，假抛只影响本房间的表现。
 - 网球落地声是当前客户端的唯一音效。落地前的垂直速度决定音量，地毯上的撞击声更柔和。样本随客户端发布，首次输入后由 Web Audio 解码，可在设置中静音。 [落地采样 · Negraovictor · CC0](https://freesound.org/people/Negraovictor/sounds/394355/)
 - 停用的声音采样保存在源资源中。 [客厅底声 · visionear · CC0](https://freesound.org/people/visionear/sounds/565536/) · [木地板步态 · Wdomino · CC0](https://freesound.org/people/Wdomino/sounds/517127/) · [地毯爪垫 · KFerentchak · CC0](https://freesound.org/people/KFerentchak/sounds/235932/) · [喘息 · qubodup · CC0](https://freesound.org/people/qubodup/sounds/841349/) · [轻叫 · 8bitmyketison · CC0](https://freesound.org/people/8bitmyketison/sounds/699822/)
 - 球停稳后团子才开始追球，用 `Run_F_IP` 和对应的根运动步幅移动，靠近球时减速步行。低头和抬头复用 `EatDrink_start`、`EatDrink_end`，在嘴碰到球的高度衔接，叼住后球随头部骨骼移动。返回用步行动画，团子会在房间前侧放下球。
