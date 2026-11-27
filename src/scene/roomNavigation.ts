@@ -140,17 +140,33 @@ export type FetchPlan = {
   homeward: FloorPoint[];
 };
 
-export function planFetch(start: FloorPoint, ball: FloorPoint): FetchPlan | null {
+export function planFetch(start: FloorPoint, ball: FloorPoint, delivery = deliveryStop): FetchPlan | null {
   if (!clearsRoomProps(ball, ball, ballStart.radius)) return null;
   const direct = Math.atan2(ball.x - start.x, ball.z - start.z);
   const outward = Math.atan2(ball.x, ball.z + 1.2);
   for (const heading of [direct, outward, outward - 0.55, outward + 0.55, outward - 1.05, outward + 1.05]) {
     const pickup = fetchStop(ball, heading);
     const outbound = routeTo(start, pickup.approach, runClearance);
-    const homeward = routeTo(pickup.approach, deliveryStop.approach, dogClearance);
-    if (outbound && homeward) return { pickup, delivery: deliveryStop, outbound, homeward };
+    const homeward = routeTo(pickup.approach, delivery.approach, dogClearance);
+    if (outbound && homeward) return { pickup, delivery, outbound, homeward };
   }
   return null;
+}
+
+export function planPlayInvitation(start: FloorPoint, ball: FloorPoint) {
+  // Alternate sides when the ball is already at the front of the rug.
+  for (const x of [-0.72, 0.96]) {
+    const point = { x, z: 2.22 };
+    if (Math.hypot(x - ball.x, point.z - ball.z) < 1) continue;
+    const plan = planFetch(start, ball, fetchStop(point, x < 0 ? 0.3 : -0.3));
+    if (plan) return plan;
+  }
+  return null;
+}
+
+export function planShortStep(start: FloorPoint, heading: number, distance: number) {
+  const target = { x: start.x + distance * Math.sin(heading), z: start.z + distance * Math.cos(heading) };
+  return clearsRoomProps(start, target, dogClearance) ? target : null;
 }
 
 export function chooseWalkTarget(start: FloorPoint, ball: FloorPoint): FloorPoint | null {

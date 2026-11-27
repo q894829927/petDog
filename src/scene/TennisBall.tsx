@@ -92,6 +92,15 @@ export function dropBall(ball: BallState) {
   ball.motion = launchBall(from, velocity, predictBallPath(from, velocity), 0, null);
 }
 
+export function nudgeBall(ball: BallState, direction: FloorPoint) {
+  if (!ball.mesh) return;
+  const from = ball.mesh.position.clone();
+  const velocity = new Vector3(direction.x, 0, direction.z).normalize().multiplyScalar(0.95);
+  const roll = launchBall(from, velocity, predictBallPath(from, velocity), 0, null);
+  roll.body.rolling = true;
+  ball.motion = roll;
+}
+
 export function ballFloorPoint({ mesh, motion }: BallState): FloorPoint {
   if (motion.phase === "held") return motion.origin;
   if (motion.phase === "putBack") return motion.to;

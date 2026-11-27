@@ -376,6 +376,7 @@ SQLite 使用短写事务，例如 BEGIN IMMEDIATE，避免两个设备同时结
 - 网球落地声是当前客户端的唯一音效。落地前的垂直速度决定音量，地毯上的撞击声更柔和。样本随客户端发布，首次输入后由 Web Audio 解码，可在设置中静音。 [落地采样 · Negraovictor · CC0](https://freesound.org/people/Negraovictor/sounds/394355/)
 - 停用的声音采样保存在源资源中。 [客厅底声 · visionear · CC0](https://freesound.org/people/visionear/sounds/565536/) · [木地板步态 · Wdomino · CC0](https://freesound.org/people/Wdomino/sounds/517127/) · [地毯爪垫 · KFerentchak · CC0](https://freesound.org/people/KFerentchak/sounds/235932/) · [喘息 · qubodup · CC0](https://freesound.org/people/qubodup/sounds/841349/) · [轻叫 · 8bitmyketison · CC0](https://freesound.org/people/8bitmyketison/sounds/699822/)
 - 球停稳后团子才开始追球，用 `Run_F_IP` 和对应的根运动步幅移动，靠近球时减速步行。低头和抬头复用 `EatDrink_start`、`EatDrink_end`，在嘴碰到球的高度衔接，叼住后球随头部骨骼移动。返回用步行动画，团子会在房间前侧放下球。
+- 自主邀玩复用叼取和归还路线，在前景地毯上另选交付点。房间在前台且玩家闲置约 30–45 秒后团子可发起邀玩，精力低于 25 或正在照料、打盹时让位。邀请间隔至少 120 秒，放下球后用鼻尖推球沿地毯短暂滚动，等候约 8 秒。自主送球只改变房间表现，只有完成玩家真抛的往返才结算玩耍。
 - 往返两程都用犬身的安全距离检查墙边、碗、狗窝和窗边的花盆。直线被挡住时，可经中央空地转向。抚摸或呼唤等操作可以打断追球。空中的球继续按物理运动至停稳，叼着的球从嘴边落下。
 - 放入狗粮或清水后，团子绕开球和狗窝，走到浅碗前对准碗再低头。`Eat_loop` 和 `Drink_loop` 各自与 `EatDrink_start`、`EatDrink_end` 合成一段动作，碗内食物和水量随播放进度减少。
 - 自主活动会在客厅地板上随机选取附近的落脚点。选点时为身体留出空间，并检查整段路线能否避开场景摆设和球。步行使用 `Walk_F_IP`，按对应根运动 `Walk_F_RM` 的步幅移动。到达后可以站立待机，也可以播放由 `Sitting_start`、`Sitting_loop` 和 `Sitting_end` 合成的坐下休息动作。

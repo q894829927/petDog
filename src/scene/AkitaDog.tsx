@@ -5,6 +5,7 @@ import {
   AnimationMixer,
   AnimationUtils,
   LoopOnce,
+  LoopPingPong,
   MathUtils,
   Mesh,
   Quaternion,
@@ -22,7 +23,7 @@ import type { DogShadowAnchors } from "./GroundContactShadows";
 import { hitPetTarget } from "./petTouch";
 import { createReclinedPose, reclineClips, rollIntoRecline, rollOutOfRecline } from "./reclinedPose";
 import type { HandContact, HandGesture } from "./PlayerHand";
-import { ballFloorPoint, dropBall, type BallState } from "./TennisBall";
+import { ballFloorPoint, dropBall, nudgeBall, type BallState } from "./TennisBall";
 import { pulseOnTouch } from "./touchHaptics";
 import { useAkitaModel } from "./useAkitaModel";
 import {
@@ -37,6 +38,8 @@ import {
   planFetch,
   planMeal,
   planNap,
+  planPlayInvitation,
+  planShortStep,
   type FetchPlan,
   type FloorPoint,
   type WalkPlan,
@@ -60,10 +63,13 @@ const loopingClips = ["Idle", "Walk", "Run", "Carry", "Nap", "Recline"];
 
 type FetchTrip = {
   plan: FetchPlan;
+  source: "throw" | "invitation";
   owner: number | null;
   phase: "chase" | "pickup" | "return" | "drop";
   waypoint: number;
 };
+
+type PlayOffer = { phase: "wait"; timeLeft: number } | { phase: "stepBack"; target: FloorPoint };
 
 type Approach = WalkPlan & { kind: MealKind | "call" | "nap"; waypoint: number; owner: number | null };
 
@@ -166,10 +172,13 @@ export function AkitaDog(props: AkitaProps) {
 function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: AkitaProps & { scene: Group; assetClips: AnimationClip[] }) {
   const animations = useMemo(() => {
     const idle = AnimationClip.findByName(assetClips, "Idle");
-    if (!idle) throw new Error("Akita animation missing: Idle");
+    const napDown = AnimationClip.findByName(assetClips, "NapDown");
+    if (!idle || !napDown) throw new Error("Akita animation missing: Idle or NapDown");
+    // Early in the authored lie-down the forepaws reach forward and both hind paws stay planted.
+    const bow = AnimationUtils.subclip(napDown, "PlayBow", 0, 14, 24);
     const chin = touchClip(idle, "LiftChin", "head", new Vector3(1, 0, 0), (t) => 0.42 * Math.sin(Math.PI * t));
     const brush = touchClip(idle, "Brush", "tail_01", new Vector3(0, 1, 0), (t) => 0.58 * Math.sin(6 * Math.PI * t) * Math.sin(Math.PI * t));
-    return [...assetClips, chin, brush, ...reclineClips(assetClips)];
+    return [...assetClips, chin, brush, bow, ...reclineClips(assetClips)];
   }, [assetClips]);
   const mixer = useMemo(() => new AnimationMixer(scene), [scene]);
   const reactions = useMemo(() => {
@@ -201,6 +210,8 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
   const poseReclined = useMemo(createReclinedPose, []);
   const roaming = useRef({ target: null as FloorPoint | null, restTime: 1.7, activeTime: 0, napAfter: 24 });
   const fetch = useRef<FetchTrip | null>(null);
+  const invitation = useRef({ idle: 0, after: MathUtils.randFloat(30, 45), cooldown: 0 });
+  const offer = useRef<PlayOffer | null>(null);
   const approach = useRef<Approach | null>(null);
   const nap = useRef<{
     timeLeft: number;
@@ -216,6 +227,20 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
   const petStroke = useRef<PetStroke | null>(null);
   const brushing = useRef<{ pointer: number; startZ: number; completed: boolean } | null>(null);
   const rearTap = useRef<RearTap | null>(null);
+
+  useEffect(() => {
+    const resetIdle = () => { invitation.current.idle = 0; };
+    window.addEventListener("pointerdown", resetIdle, true);
+    window.addEventListener("pointermove", resetIdle, true);
+    window.addEventListener("keydown", resetIdle, true);
+    document.addEventListener("visibilitychange", resetIdle);
+    return () => {
+      window.removeEventListener("pointerdown", resetIdle, true);
+      window.removeEventListener("pointermove", resetIdle, true);
+      window.removeEventListener("keydown", resetIdle, true);
+      document.removeEventListener("visibilitychange", resetIdle);
+    };
+  }, []);
   const rearReaction = useRef<RearReaction | null>(null);
 
   const play = useCallback((name: string, time = 0) => {
@@ -230,7 +255,8 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     action.time = time;
     action.timeScale = name === "Run" ? runPlaybackRate : 1;
     if (!loopingClips.includes(name)) {
-      action.setLoop(LoopOnce, 1);
+      if (name === "PlayBow") action.setLoop(LoopPingPong, 2);
+      else action.setLoop(LoopOnce, 1);
       action.clampWhenFinished = true;
     }
     action.play();
@@ -271,6 +297,10 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
 
     const onFinished = ({ action }: { action: AnimationAction }) => {
       if (action !== currentAction.current || action.getClip().name === "ReachBall" || nap.current || recline.current) return;
+      if (action.getClip().name === "PlayBow") {
+        play("Idle");
+        return;
+      }
       const dining = approach.current;
       if (dining && (dining.kind === "feed" || dining.kind === "water") &&
           action.getClip().name === mealClips[dining.kind]) {
@@ -301,6 +331,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     const toy = sceneBall.mesh;
     const group = dog.current;
     const { pet } = useCloudPet.getState();
+    offer.current = null;
     rearReaction.current = null;
     if (interaction.kind !== "pet" || interaction.part === "rear") reactions.fade();
     if (interaction.kind === "ball") {
@@ -316,7 +347,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
         useGameUI.getState().setNotice("球停在团子够不到的地方了。");
         return;
       }
-      fetch.current = { plan, owner: sceneBall.motion.owner, phase: "chase", waypoint: 0 };
+      fetch.current = { plan, source: "throw", owner: sceneBall.motion.owner, phase: "chase", waypoint: 0 };
       approach.current = null;
       roaming.current.target = null;
       play("Idle");
@@ -349,7 +380,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     }
 
     if (fetch.current) {
-      dropBall(sceneBall);
+      if (sceneBall.motion.phase === "fetch") dropBall(sceneBall);
       fetch.current = null;
     }
     roaming.current.target = null;
@@ -450,8 +481,22 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     const { pickup, delivery, outbound, homeward } = trip.plan;
     if (trip.phase === "pickup" || trip.phase === "drop") {
       const contacted = action.time >= biteTime;
+      if (trip.phase === "pickup" && contacted && trip.source === "invitation" && ball.current.motion.phase === "rest") {
+        ball.current.motion = { phase: "fetch", owner: null };
+      }
       if (trip.phase === "pickup" ? contacted : !contacted) holdBall(toy);
-      if (trip.phase === "drop" && contacted) toy.position.set(delivery.ball.x, ballGroundY, delivery.ball.z);
+      if (trip.phase === "drop" && contacted) {
+        toy.position.set(delivery.ball.x, ballGroundY, delivery.ball.z);
+        if (trip.source === "invitation") {
+          nudgeBall(ball.current, { x: Math.sin(delivery.heading), z: Math.cos(delivery.heading) });
+          fetch.current = null;
+          offer.current = { phase: "wait", timeLeft: 8 };
+          play("PlayBow");
+          reactions.play({ part: "tailRoot" });
+          useGameUI.getState().setNotice("团子把球推到你面前，等你陪它玩。");
+          return;
+        }
+      }
       if (action.time < action.getClip().duration) return;
 
       if (trip.phase === "pickup") {
@@ -475,7 +520,7 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     const heading = target ? headingTo(group.position, target) : (carrying ? delivery.heading : pickup.heading);
     const aligned = face(group, heading, turnSpeed * step);
     if (target && aligned) {
-      const running = !carrying && hasRoomToRun(group.position, pickup.ball);
+      const running = trip.source === "throw" && !carrying && hasRoomToRun(group.position, pickup.ball);
       const movement = play(carrying ? "Carry" : running ? "Run" : "Walk");
       const speed = running ? runSpeed : walkSpeed;
       if (moveToward(group.position, target, speed * step * movement.getEffectiveWeight())) trip.waypoint++;
@@ -494,6 +539,13 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
     const pose = currentAction.current?.getClip().name;
     const contact = handContact.current;
     const ballPhase = ball.current.motion.phase;
+    const ui = useGameUI.getState();
+    const timing = invitation.current;
+    if (!document.hidden) {
+      timing.cooldown = Math.max(0, timing.cooldown - step);
+      if (ui.panel || ui.foodOpen || contact?.pressed || ballPhase === "held") timing.idle = 0;
+      else timing.idle += step;
+    }
     const canWag = (pose === "Idle" || pose === "Walk") &&
       !approach.current && !recline.current && !rearReaction.current && ballPhase !== "flight" && ballPhase !== "fetch" &&
       !(contact?.pressed && isTailPart(contact.gesture));
@@ -557,7 +609,40 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
 
     const trip = fetch.current;
     if (trip && toy) {
+      // Until the dog's mouth actually takes it, the player can still pick up the ball first.
+      if (trip.source === "invitation" && ballPhase !== "rest" && ballPhase !== "fetch") {
+        fetch.current = null;
+        rest();
+        return;
+      }
       advanceFetch(trip, group, toy, action, step);
+      return;
+    }
+
+    const greeting = offer.current;
+    if (greeting) {
+      if (ball.current.motion.phase === "flight" && ball.current.motion.play) {
+        offer.current = null;
+        rest();
+      } else if (greeting.phase === "stepBack") {
+        const walk = play("Walk");
+        walk.setEffectiveTimeScale(-0.72);
+        if (moveToward(group.position, greeting.target, walkSpeed * 0.72 * step * walk.getEffectiveWeight())) {
+          offer.current = null;
+          rest();
+        }
+      } else if (ballPhase === "held") {
+        const target = planShortStep(group.position, group.rotation.y, -0.38);
+        offer.current = target ? { phase: "stepBack", target } : null;
+        if (!target) rest();
+      } else {
+        greeting.timeLeft -= step;
+        if (greeting.timeLeft <= 0) {
+          offer.current = null;
+          rest();
+          roaming.current.restTime = 0;
+        }
+      }
       return;
     }
 
@@ -657,14 +742,31 @@ function AkitaActor({ ball, dog, dogAnchors, handContact, scene, assetClips }: A
       return;
     }
     const ballPosition = ballFloorPoint(ball.current);
-    if (clip === "Idle" || clip === "Walk" || clip === "Sit") activity.activeTime += step;
+    const free = clip === "Idle" || clip === "Walk" || clip === "Sit";
+    if (free) activity.activeTime += step;
+    const tired = cloud.pet?.sleeping || (cloud.pet?.energy ?? 100) < 25;
+    const canInvite = free && !document.hidden && !tired && !ui.panel && !ui.foodOpen && !contact?.pressed &&
+      timing.cooldown <= 0 && ballMotion.phase === "rest" && toy?.position.y === ballGroundY;
+    if (canInvite && timing.idle >= timing.after) {
+      const plan = planPlayInvitation(group.position, ballPosition);
+      timing.idle = 0;
+      timing.after = MathUtils.randFloat(30, 45);
+      if (plan) {
+        timing.cooldown = MathUtils.randFloat(120, 155);
+        activity.target = null;
+        fetch.current = { source: "invitation", plan, owner: null, phase: "chase", waypoint: 0 };
+        play("Idle");
+        ui.setNotice("团子想找你玩，去叼球了。");
+        return;
+      }
+    }
     if (clip === "Idle") {
       if (petting || grooming) return;
       activity.restTime -= step;
       if (activity.restTime > 0) return;
       const { accountId: owner, pet } = cloud;
       const napAfter = pet?.sleeping ? 0 : pet && pet.energy < 25 ? 8 : activity.napAfter;
-      if (activity.activeTime >= napAfter) {
+      if (activity.activeTime >= napAfter && !(canInvite && timing.idle >= 18)) {
         activity.activeTime = 0;
         activity.napAfter = MathUtils.randFloat(24, 38);
         const plan = planNap(group.position, ballPosition);
